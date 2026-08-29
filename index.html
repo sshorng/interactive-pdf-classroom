@@ -2266,8 +2266,6 @@
     let teacherInkActiveStroke = null;
     let teacherInkErasing = false;
     let teacherInkChanged = false;
-    let lastTeacherPenTapTime = 0;
-    let lastTeacherPenTapPoint = null;
 
     function bindTeacherInkCanvas() {
       const canvas = document.getElementById("inkCanvas");
@@ -2287,7 +2285,7 @@
       if (!isDrawing && !isPen) return;
       if (event.pointerType === "touch") {
         if (event.isPrimary === false) return;
-        if (event.width > 28 || event.height > 28) return;
+        if (event.width > 65 && event.height > 65) return;
       }
       if (!isDrawing && isPen) {
         setTeacherInkMode(true);
@@ -2300,18 +2298,6 @@
         try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
       }
       const point = canvasPoint(event, canvas);
-      if (isPen) {
-        const now = performance.now();
-        if (lastTeacherPenTapPoint && (now - lastTeacherPenTapTime < 350) && Math.hypot(point.x - lastTeacherPenTapPoint.x, point.y - lastTeacherPenTapPoint.y) < 0.035) {
-          lastTeacherPenTapTime = 0;
-          lastTeacherPenTapPoint = null;
-          teacherInkActivePointerId = null;
-          togglePencilEraser();
-          return;
-        }
-        lastTeacherPenTapTime = now;
-        lastTeacherPenTapPoint = point;
-      }
       teacherInkChanged = false;
       if (state.inkTool === "eraser") {
         teacherInkErasing = true;
@@ -3818,8 +3804,6 @@
     let reviewErasing = false;
     let reviewInkChanged = false;
     let isReviewPinching = false;
-    let lastReviewPenTapTime = 0;
-    let lastReviewPenTapPoint = null;
 
     function bindReviewCanvas(canvas) {
       if (!canvas || canvas.dataset.bound === "1") return;
@@ -3829,7 +3813,7 @@
         const isPen = event.pointerType === "pen";
         if (event.pointerType === "touch") {
           if (event.isPrimary === false) return;
-          if (event.width > 28 || event.height > 28) return;
+          if (event.width > 65 && event.height > 65) return;
         }
         event.preventDefault();
         reviewActivePointerId = event.pointerId;
@@ -3837,18 +3821,6 @@
           try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
         }
         const point = canvasPoint(event, canvas);
-        if (isPen) {
-          const now = performance.now();
-          if (lastReviewPenTapPoint && (now - lastReviewPenTapTime < 350) && Math.hypot(point.x - lastReviewPenTapPoint.x, point.y - lastReviewPenTapPoint.y) < 0.035) {
-            lastReviewPenTapTime = 0;
-            lastReviewPenTapPoint = null;
-            reviewActivePointerId = null;
-            togglePencilEraser();
-            return;
-          }
-          lastReviewPenTapTime = now;
-          lastReviewPenTapPoint = point;
-        }
         reviewInkChanged = false;
         if (state.reviewTool === "eraser") {
           reviewErasing = true;
