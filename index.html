@@ -328,11 +328,16 @@
     .classroom-modal-layout .review-toolbar input[type="color"] { width: 30px; height: 29px; }
     .classroom-modal-layout .review-toolbar input[type="range"] { width: 76px; }
     .classroom-modal-layout .review-toolbar .button.small { min-height: 32px; padding: 5px 8px; font-size: 12px; }
+    .classroom-modal-layout .review-toolbar .review-zoom-group { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px; background: #fff; border: 1px solid #d5d5cb; border-radius: 8px; }
+    .classroom-modal-layout .review-toolbar .review-zoom-group .toolbar-button { width: 28px; min-width: 28px; min-height: 28px; padding: 0; font-size: 15px; border-radius: 6px; }
+    .classroom-modal-layout .review-toolbar .review-zoom-group .toolbar-label { min-width: 42px; font-size: 11px; text-align: center; }
     .classroom-modal-layout #clearAllReviewStrokesButton { display: none; }
     .review-ink-controls { min-width: 0; gap: 5px; }
     .review-ink-controls select { min-height: 32px; width: auto; padding: 5px 8px; }
-    .classroom-modal-layout .review-image-stage { max-height: min(62vh, 720px); margin-bottom: 10px; }
-    .classroom-modal-layout .review-image-wrap img { max-width: min(900px, 100%); max-height: min(62vh, 700px); }
+    .classroom-modal-layout .review-image-stage { position: relative; width: 100%; max-width: 100%; max-height: min(62vh, 720px); overflow: auto; margin: 0 auto 10px; background: #eeeae0; border: 1px solid var(--line); border-radius: 13px; text-align: center; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; }
+    .classroom-modal-layout .review-image-wrap { position: relative; display: inline-block; margin: 0 auto; width: fit-content; min-width: 200px; transform-origin: center top; }
+    .classroom-modal-layout .review-image-wrap img { display: block; max-width: min(900px, 100%); max-height: min(62vh, 700px); width: auto; height: auto; border-radius: 6px; }
+    .classroom-modal-layout .review-image-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; border-radius: 6px; }
     .classroom-pdf-panel { position: relative; }
     .classroom-toolbar-title { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin-right: auto; color: var(--teal-dark); font-size: 13px; font-weight: 800; white-space: nowrap; }
     .classroom-toolbar-title button { min-height: 40px; padding: 7px 10px; color: var(--teal-dark); background: transparent; border: 1px solid #d5d5cb; border-radius: 9px; }
@@ -610,6 +615,7 @@
       reviewTool: "pen",
       previousReviewTool: "pen",
       reviewShape: "arrow",
+      reviewZoom: 1,
       adminToken: localStorage.getItem(APP_KEY + "admin_token") || "",
       pollTimer: null,
       outboxRetryTimer: null,
@@ -3485,11 +3491,12 @@
       const panel = document.getElementById("reviewPanel");
       const submission = state.reviewSubmission;
       if (!panel || !submission) return;
+      state.reviewZoom = 1;
       const feedback = normalizeFeedback(submission.teacherStrokes);
       state.reviewPhotoIndex = clamp(feedback.photoIndex, 0, Math.max(0, (submission.imageFileIds || []).length - 1));
       state.reviewStrokes = JSON.parse(JSON.stringify(feedback.strokes || []));
       state.reviewComment = submission.teacherComment || "";
-       panel.innerHTML = "<div class=\"review-meta\"><div><p class=\"eyebrow\">" + escapeHtml(areaTitle(submission.areaId)) + "</p><h2>" + escapeHtml(submission.nickname || "未填暱稱") + "的作答</h2><p>送出於 " + escapeHtml(formatTime(submission.createdAt)) + "，最近更新於 " + escapeHtml(formatTime(submission.updatedAt)) + "</p></div><span class=\"meta-chip\">" + escapeHtml(submission.status || "待批改") + "</span></div><div class=\"review-toolbar\"><label>筆色 <input type=\"color\" id=\"reviewColorField\" value=\"" + escapeHtml(state.reviewColor) + "\"></label><label>粗細 <span class=\"review-width-selector\"><button class=\"review-width-btn\" data-review-width=\"2\" type=\"button\">2</button><button class=\"review-width-btn active\" data-review-width=\"4\" type=\"button\">4</button><button class=\"review-width-btn\" data-review-width=\"6\" type=\"button\">6</button><button class=\"review-width-btn\" data-review-width=\"8\" type=\"button\">8</button></span></label><button class=\"button small subtle\" id=\"undoStrokeButton\" type=\"button\">復原一筆</button><button class=\"button small danger\" id=\"clearStrokesButton\" type=\"button\">清除筆跡</button></div><div class=\"photo-tabs\" id=\"reviewPhotoTabs\"></div><div class=\"review-image-stage\" id=\"reviewImageStage\"><div class=\"inline-message\">正在載入答案照片……</div></div><div class=\"review-text-answer\"><strong>文字答案</strong><br>" + escapeHtml(submission.text || "學生沒有另外輸入文字。") + "</div><div class=\"review-bottom\"><div><label for=\"teacherCommentField\" class=\"helper\">教師評語</label><textarea id=\"teacherCommentField\" maxlength=\"1000\" placeholder=\"寫下給學生的提醒或回饋……\">" + escapeHtml(state.reviewComment) + "</textarea></div><div class=\"review-bottom-actions\"><button class=\"button small\" id=\"exportCurrentButton\" type=\"button\">下載批改圖</button><button class=\"button primary small\" id=\"saveFeedbackButton\" type=\"button\">儲存教師批改</button></div></div>";
+       panel.innerHTML = "<div class=\"review-meta\"><div><p class=\"eyebrow\">" + escapeHtml(areaTitle(submission.areaId)) + "</p><h2>" + escapeHtml(submission.nickname || "未填暱稱") + "的作答</h2><p>送出於 " + escapeHtml(formatTime(submission.createdAt)) + "，最近更新於 " + escapeHtml(formatTime(submission.updatedAt)) + "</p></div><span class=\"meta-chip\">" + escapeHtml(submission.status || "待批改") + "</span></div><div class=\"review-toolbar\"><label>筆色 <input type=\"color\" id=\"reviewColorField\" value=\"" + escapeHtml(state.reviewColor) + "\"></label><label>粗細 <span class=\"review-width-selector\"><button class=\"review-width-btn\" data-review-width=\"2\" type=\"button\">2</button><button class=\"review-width-btn active\" data-review-width=\"4\" type=\"button\">4</button><button class=\"review-width-btn\" data-review-width=\"6\" type=\"button\">6</button><button class=\"review-width-btn\" data-review-width=\"8\" type=\"button\">8</button></span></label><div class=\"toolbar-group review-zoom-group\"><button class=\"toolbar-button\" id=\"reviewZoomOutButton\" type=\"button\" title=\"縮小\">−</button><span class=\"toolbar-label\" id=\"reviewZoomLabel\">100％</span><button class=\"toolbar-button\" id=\"reviewZoomInButton\" type=\"button\" title=\"放大\">＋</button><button class=\"toolbar-button\" id=\"reviewZoomFitButton\" type=\"button\" title=\"原始大小\">適合</button></div><button class=\"button small subtle\" id=\"undoStrokeButton\" type=\"button\">復原一筆</button><button class=\"button small danger\" id=\"clearStrokesButton\" type=\"button\">清除筆跡</button></div><div class=\"photo-tabs\" id=\"reviewPhotoTabs\"></div><div class=\"review-image-stage\" id=\"reviewImageStage\"><div class=\"inline-message\">正在載入答案照片……</div></div><div class=\"review-text-answer\"><strong>文字答案</strong><br>" + escapeHtml(submission.text || "學生沒有另外輸入文字。") + "</div><div class=\"review-bottom\"><div><label for=\"teacherCommentField\" class=\"helper\">教師評語</label><textarea id=\"teacherCommentField\" maxlength=\"1000\" placeholder=\"寫下給學生的提醒或回饋……\">" + escapeHtml(state.reviewComment) + "</textarea></div><div class=\"review-bottom-actions\"><button class=\"button small\" id=\"exportCurrentButton\" type=\"button\">下載批改圖</button><button class=\"button primary small\" id=\"saveFeedbackButton\" type=\"button\">儲存教師批改</button></div></div>";
        const reviewMeta = panel.querySelector(".review-meta");
        if (reviewMeta) reviewMeta.remove();
       const exportButton = document.getElementById("exportCurrentButton");
@@ -3505,6 +3512,9 @@
           });
         });
       });
+      document.getElementById("reviewZoomOutButton").addEventListener("click", function () { setReviewZoom((state.reviewZoom || 1) - 0.2); });
+      document.getElementById("reviewZoomInButton").addEventListener("click", function () { setReviewZoom((state.reviewZoom || 1) + 0.2); });
+      document.getElementById("reviewZoomFitButton").addEventListener("click", function () { setReviewZoom(1.0); });
       document.getElementById("undoStrokeButton").addEventListener("click", function () { state.reviewStrokes.pop(); drawReviewCanvas(); });
       document.getElementById("clearStrokesButton").addEventListener("click", clearReviewStrokes);
       document.getElementById("teacherCommentField").addEventListener("input", function (event) { state.reviewComment = event.target.value; });
@@ -3556,13 +3566,155 @@
         try { return await fetchFileData(id, state.boardId); } catch (error) { return ""; }
       }));
       tabs.innerHTML = state.reviewImages.map(function (_, index) { return "<button class=\"photo-tab " + (index === state.reviewPhotoIndex ? "active" : "") + "\" data-photo-index=\"" + index + "\" type=\"button\">照片 " + (index + 1) + "</button>"; }).join("");
-      tabs.querySelectorAll("[data-photo-index]").forEach(function (button) { button.addEventListener("click", function () { state.reviewPhotoIndex = Number(button.dataset.photoIndex); const feedback = normalizeFeedback(state.reviewSubmission.teacherStrokes); state.reviewStrokes = state.reviewPhotoIndex === feedback.photoIndex ? JSON.parse(JSON.stringify(feedback.strokes || [])) : []; loadReviewImages(); }); });
+      tabs.querySelectorAll("[data-photo-index]").forEach(function (button) { button.addEventListener("click", function () { state.reviewPhotoIndex = Number(button.dataset.photoIndex); const feedback = normalizeFeedback(state.reviewSubmission.teacherStrokes); state.reviewStrokes = state.reviewPhotoIndex === feedback.photoIndex ? JSON.parse(JSON.stringify(feedback.strokes || [])) : []; state.reviewZoom = 1; loadReviewImages(); }); });
       const dataUrl = state.reviewImages[state.reviewPhotoIndex];
       if (!dataUrl) { stage.innerHTML = "<div class=\"inline-message\">照片讀取失敗，請稍後重試。</div>"; return; }
       stage.innerHTML = "<div class=\"review-image-wrap\"><img id=\"reviewImage\" src=\"" + dataUrl + "\" alt=\"學生答案照片\"><canvas id=\"reviewCanvas\"></canvas></div>";
       const image = document.getElementById("reviewImage");
-      image.onload = function () { const canvas = document.getElementById("reviewCanvas"); sizeAnnotationCanvas(canvas, image); drawReviewCanvas(); bindReviewCanvas(canvas); };
-      if (image.complete) { const canvas = document.getElementById("reviewCanvas"); sizeAnnotationCanvas(canvas, image); drawReviewCanvas(); bindReviewCanvas(canvas); }
+      image.onload = function () {
+        const canvas = document.getElementById("reviewCanvas");
+        sizeAnnotationCanvas(canvas, image);
+        drawReviewCanvas();
+        bindReviewCanvas(canvas);
+        bindReviewPinchZoom(stage);
+      };
+      if (image.complete) {
+        const canvas = document.getElementById("reviewCanvas");
+        sizeAnnotationCanvas(canvas, image);
+        drawReviewCanvas();
+        bindReviewCanvas(canvas);
+        bindReviewPinchZoom(stage);
+      }
+    }
+
+    function bindReviewPinchZoom(stage) {
+      if (!stage || stage.dataset.zoomBound === "1") return;
+      stage.dataset.zoomBound = "1";
+      let initialPinchDistance = 0;
+      let initialZoom = 1;
+      let lastPinchScale = 1;
+      let lastTapTime = 0;
+
+      function getPinchDist(e) {
+        if (!e.touches || e.touches.length < 2) return 0;
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        return Math.hypot(dx, dy);
+      }
+
+      stage.addEventListener("touchstart", function (event) {
+        if (event.touches.length === 2) {
+          isReviewPinching = true;
+          cancelReviewStroke();
+          initialPinchDistance = getPinchDist(event);
+          initialZoom = state.reviewZoom || 1;
+          lastPinchScale = 1;
+          const wrap = stage.querySelector(".review-image-wrap");
+          if (wrap) {
+            wrap.style.transformOrigin = "center top";
+            wrap.style.transition = "none";
+          }
+        }
+      }, { passive: false });
+
+      stage.addEventListener("touchmove", function (event) {
+        if (event.touches.length === 2 && isReviewPinching && initialPinchDistance > 0) {
+          event.preventDefault();
+          const currDist = getPinchDist(event);
+          if (currDist > 0) {
+            lastPinchScale = currDist / initialPinchDistance;
+            const targetZoom = clamp(initialZoom * lastPinchScale, 0.6, 4.0);
+            const wrap = stage.querySelector(".review-image-wrap");
+            if (wrap) {
+              wrap.style.transform = "scale(" + (targetZoom / (state.reviewZoom || 1)) + ")";
+            }
+          }
+        }
+      }, { passive: false });
+
+      stage.addEventListener("touchend", function (event) {
+        if (isReviewPinching) {
+          if (event.touches.length < 2) {
+            isReviewPinching = false;
+            const wrap = stage.querySelector(".review-image-wrap");
+            if (wrap) {
+              wrap.style.transform = "";
+              wrap.style.transition = "";
+            }
+            if (lastPinchScale && Math.abs(lastPinchScale - 1) > 0.03) {
+              setReviewZoom(clamp(initialZoom * lastPinchScale, 0.6, 4.0));
+            }
+            initialPinchDistance = 0;
+            lastPinchScale = 1;
+          }
+          return;
+        }
+        if (event.changedTouches.length === 1 && !event.target.closest("textarea, input, select, button")) {
+          const now = performance.now();
+          if (now - lastTapTime < 300) {
+            lastTapTime = 0;
+            setReviewZoom(state.reviewZoom > 1.1 ? 1.0 : 1.8);
+          } else {
+            lastTapTime = now;
+          }
+        }
+      }, { passive: false });
+
+      stage.addEventListener("touchcancel", function () {
+        if (isReviewPinching) {
+          isReviewPinching = false;
+          const wrap = stage.querySelector(".review-image-wrap");
+          if (wrap) {
+            wrap.style.transform = "";
+            wrap.style.transition = "";
+          }
+        }
+        initialPinchDistance = 0;
+        lastPinchScale = 1;
+      }, { passive: true });
+
+      stage.addEventListener("wheel", function (event) {
+        if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          const delta = -event.deltaY;
+          const factor = delta > 0 ? 1.1 : 0.9;
+          setReviewZoom(clamp((state.reviewZoom || 1) * factor, 0.6, 4.0));
+        }
+      }, { passive: false });
+    }
+
+    function setReviewZoom(newZoom) {
+      state.reviewZoom = clamp(Math.round(newZoom * 100) / 100, 0.6, 4.0);
+      const stage = document.getElementById("reviewImageStage");
+      if (!stage) return;
+      const wrap = stage.querySelector(".review-image-wrap");
+      const img = stage.querySelector("#reviewImage");
+      const canvas = stage.querySelector("#reviewCanvas");
+      const label = document.getElementById("reviewZoomLabel");
+      if (label) label.textContent = Math.round(state.reviewZoom * 100) + "％";
+      if (!wrap || !img) return;
+
+      if (state.reviewZoom === 1) {
+        wrap.style.transform = "";
+        img.style.maxWidth = "min(900px, 100%)";
+        img.style.maxHeight = "min(62vh, 700px)";
+        img.style.width = "auto";
+        img.style.height = "auto";
+      } else {
+        const baseWidth = img.naturalWidth || 800;
+        const stageWidth = Math.max(260, stage.clientWidth - 40);
+        const refWidth = Math.min(baseWidth, stageWidth);
+        const targetWidth = Math.round(refWidth * state.reviewZoom);
+        wrap.style.transform = "";
+        img.style.maxWidth = "none";
+        img.style.maxHeight = "none";
+        img.style.width = targetWidth + "px";
+        img.style.height = "auto";
+      }
+      if (canvas && img) {
+        sizeAnnotationCanvas(canvas, img);
+        drawReviewCanvas();
+      }
     }
 
     function drawReviewCanvas() {
@@ -3582,6 +3734,7 @@
     let reviewActiveStroke = null;
     let reviewErasing = false;
     let reviewInkChanged = false;
+    let isReviewPinching = false;
     let lastReviewPenTapTime = 0;
     let lastReviewPenTapPoint = null;
 
@@ -3589,7 +3742,7 @@
       if (!canvas || canvas.dataset.bound === "1") return;
       canvas.dataset.bound = "1";
       canvas.addEventListener("pointerdown", function (event) {
-        if (reviewActivePointerId !== null) return;
+        if (reviewActivePointerId !== null || isReviewPinching) return;
         const isPen = event.pointerType === "pen";
         if (event.pointerType === "touch") {
           if (event.isPrimary === false) return;
