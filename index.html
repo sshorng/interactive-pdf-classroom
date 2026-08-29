@@ -304,16 +304,19 @@
     .close-mini:hover { color: var(--danger); border-color: #e2bbb4; }
     .photo-drop { padding: 15px; background: #f8f6f0; border: 1px dashed #c9c9be; border-radius: 13px; }
     .photo-drop p { margin-bottom: 10px; color: var(--muted); font-size: 12px; }
-    .photo-preview-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 9px; }
-    .photo-thumb { position: relative; aspect-ratio: 1; overflow: hidden; background: #e9e7df; border-radius: 9px; }
+    .photo-preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 9px; }
+    .photo-thumb { position: relative; aspect-ratio: 4 / 3; max-height: 140px; overflow: hidden; background: #e9e7df; border: 1px solid #d8d6cc; border-radius: 10px; }
     .photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .photo-delete-btn { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; background: rgba(211, 79, 66, .9); color: #fff; font-size: 15px; font-weight: 800; line-height: 1; border: 1.5px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.25); cursor: pointer; display: grid; place-items: center; z-index: 3; transition: transform .12s, background .12s; }
+    .photo-delete-btn:hover { background: #b8382c; transform: scale(1.1); }
+    .photo-delete-btn:active { transform: scale(.95); }
     .feedback-box { margin-top: 14px; padding: 13px; background: #eef5ef; border: 1px solid #cfe1d6; border-radius: 13px; }
     .feedback-box strong { display: block; margin-bottom: 5px; color: var(--teal-dark); font-size: 13px; }
     .feedback-box p { margin-bottom: 0; color: var(--muted); white-space: pre-wrap; font-size: 13px; }
     .feedback-preview { position: relative; overflow: hidden; margin-top: 10px; background: #fff; border-radius: 9px; }
     .feedback-preview img { display: block; width: 100%; height: auto; }
     .feedback-preview canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-    .answer-actions { display: flex; gap: 8px; margin-top: 16px; padding: 12px 0 6px; position: sticky; bottom: 0; background: #fffdf8; border-top: 1px solid rgba(216,216,207,.6); z-index: 5; }
+    .answer-actions { display: flex; gap: 8px; margin-top: 16px; padding: 12px 0 8px; position: sticky; bottom: 0; background: #fffdf8; border-top: 1px solid rgba(216,216,207,.8); box-shadow: 0 -4px 10px rgba(0,0,0,.03); z-index: 10; }
     .answer-actions .button { flex: 1; }
 
     .review-shell { display: grid; gap: 15px; }
@@ -585,7 +588,7 @@
     const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbz4n8969la0hbjNCno3HM5dR0mvMbL8rvbom08wrquC8Ah8QhGjoMUAdcxF9uJl_5Kt7w/exec";
     const APP_KEY = "pdfw_";
     const DB_NAME = "pdfw_local_v1";
-    const MAX_IMAGE_COUNT = 3;
+    const MAX_IMAGE_COUNT = 2;
     const MAX_PDF_BYTES = 20 * 1024 * 1024;
     const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
     const INK_WIDTH_STEPS = [2, 4, 6, 8];
@@ -2417,6 +2420,7 @@
           teacherInkActiveStroke = null;
           teacherInkErasing = false;
           teacherInkChanged = false;
+          if (event && typeof event.stopPropagation === "function") event.stopPropagation();
           const strokes = teacherInkForPage(state.currentPage).slice();
           if (strokes.length > 0 && strokes[strokes.length - 1].points.length <= 2) strokes.pop();
           state.teacherInk.set(Number(state.currentPage), strokes);
@@ -3082,6 +3086,8 @@
       state.activeAreaId = areaId;
       state.pendingStudentImages = [];
       state.activeStudentImages = [];
+      state.keepStudentImageIds = [];
+      state.keepStudentImageNames = [];
       state.activeDraftKey = "draft-" + state.boardId + "-" + areaId + "-" + hashString(state.nickname || "guest");
       renderStudentAreaList();
       renderZones();
@@ -3099,20 +3105,45 @@
       const text = draft && draft.text !== undefined ? draft.text : (submission ? submission.text || "" : "");
       if (draft && Array.isArray(draft.images)) state.pendingStudentImages = draft.images;
       else if (submission && Array.isArray(submission.images)) state.pendingStudentImages = submission.images;
-      if (submission && Array.isArray(submission.imageFileIds)) {
-        state.activeStudentImages = [];
-        for (const fileId of submission.imageFileIds) {
-          try { state.activeStudentImages.push({ id: fileId, dataUrl: await fetchFileData(fileId, state.boardId) }); } catch (error) {}
-        }
+      
+      if (!state.keepStudentImageIds || !state.keepStudentImageIds.length) {
+        state.keepStudentImageIds = submission && Array.isArray(submission.imageFileIds) ? submission.imageFileIds.slice(0, MAX_IMAGE_COUNT) : [];
+        state.keepStudentImageNames = submission && Array.isArray(submission.imageFileNames) ? submission.imageFileNames.slice(0, MAX_IMAGE_COUNT) : [];
       }
-      panel.innerHTML = "<div class=\"answer-panel-head\"><div><h3>" + escapeHtml(area.title) + "</h3><p>" + escapeHtml(area.prompt) + "</p></div><button class=\"close-mini\" id=\"closeAnswerPanel\" type=\"button\">×</button></div><div class=\"field\"><label for=\"studentTextAnswer\">文字答案，可選填</label><textarea id=\"studentTextAnswer\" maxlength=\"5000\" placeholder=\"把你的想法寫下來……\">" + escapeHtml(text) + "</textarea></div><div class=\"photo-drop\"><p>拍照或選取答案照片，最多 3 張。上傳前會自動壓縮。</p><label class=\"button teal small\" for=\"studentPhotoField\">拍照／選取照片<input id=\"studentPhotoField\" type=\"file\" accept=\"image/*\" capture=\"environment\" multiple></label><div class=\"photo-preview-grid\" id=\"newPhotoPreview\"></div></div><div id=\"existingPhotoPreview\"></div>" + (submission && submission.teacherStrokes && (submission.teacherStrokes.strokes || Array.isArray(submission.teacherStrokes)) ? "<div class=\"feedback-box\"><strong>教師回應</strong><p>" + escapeHtml(submission.teacherComment || "教師已在答案上留下批改筆跡。") + "</p><div class=\"feedback-preview\" id=\"studentFeedbackPreview\"></div></div>" : "") + "<div class=\"answer-actions\"><button class=\"button primary\" id=\"submitStudentAnswer\" type=\"button\">" + (submission ? "更新答案" : "送出答案") + "</button></div>";
+      
+      state.activeStudentImages = [];
+      for (let i = 0; i < state.keepStudentImageIds.length; i++) {
+        const fileId = state.keepStudentImageIds[i];
+        try {
+          const url = await fetchFileData(fileId, state.boardId);
+          if (url) state.activeStudentImages.push({ id: fileId, dataUrl: url, name: state.keepStudentImageNames[i] || "答案照片.jpg" });
+        } catch (error) {}
+      }
+
+      panel.innerHTML = "<div class=\"answer-panel-head\"><div><h3>" + escapeHtml(area.title) + "</h3><p>" + escapeHtml(area.prompt) + "</p></div><button class=\"close-mini\" id=\"closeAnswerPanel\" type=\"button\">×</button></div><div class=\"field\"><label for=\"studentTextAnswer\">文字答案，可選填</label><textarea id=\"studentTextAnswer\" maxlength=\"5000\" placeholder=\"把你的想法寫下來……\">" + escapeHtml(text) + "</textarea></div><div class=\"photo-drop\"><p>拍照或選取答案照片，最多 2 張。可點擊右上角「×」刪除。</p><label class=\"button teal small\" for=\"studentPhotoField\" id=\"studentPhotoLabel\">拍照／選取照片<input id=\"studentPhotoField\" type=\"file\" accept=\"image/*\" capture=\"environment\" multiple></label><div class=\"photo-preview-grid\" id=\"newPhotoPreview\"></div></div><div id=\"existingPhotoPreview\"></div>" + (submission && submission.teacherStrokes && (submission.teacherStrokes.strokes || Array.isArray(submission.teacherStrokes)) ? "<div class=\"feedback-box\"><strong>教師回應</strong><p>" + escapeHtml(submission.teacherComment || "教師已在答案上留下批改筆跡。") + "</p><div class=\"feedback-preview\" id=\"studentFeedbackPreview\"></div></div>" : "") + "<div class=\"answer-actions\"><button class=\"button primary\" id=\"submitStudentAnswer\" type=\"button\">" + (submission ? "更新答案" : "送出答案") + "</button></div>";
       document.getElementById("closeAnswerPanel").addEventListener("click", function () { state.activeAreaId = ""; panel.innerHTML = "<div class=\"answer-panel-empty\"><div><strong>從 PDF 選一個問答區</strong><span>你的答案會和這份教材版面分開保存。</span></div></div>"; renderStudentAreaList(); renderZones(); });
       document.getElementById("studentTextAnswer").addEventListener("input", saveStudentDraft);
       document.getElementById("studentPhotoField").addEventListener("change", handleStudentPhotos);
       document.getElementById("submitStudentAnswer").addEventListener("click", submitStudentAnswer);
       renderPendingPhotoPreview();
       renderExistingPhotoPreview();
+      updatePhotoUploadButton();
       if (submission && submission.teacherStrokes && (submission.teacherStrokes.strokes || Array.isArray(submission.teacherStrokes))) renderStudentFeedbackPreview(submission);
+    }
+
+    function updatePhotoUploadButton() {
+      const label = document.getElementById("studentPhotoLabel");
+      if (!label) return;
+      const currentCount = (state.activeStudentImages ? state.activeStudentImages.length : 0) + (state.pendingStudentImages ? state.pendingStudentImages.length : 0);
+      if (currentCount >= MAX_IMAGE_COUNT) {
+        label.style.opacity = ".5";
+        label.style.pointerEvents = "none";
+        label.childNodes[0].nodeValue = "已達照片上限 (2張)";
+      } else {
+        label.style.opacity = "1";
+        label.style.pointerEvents = "auto";
+        label.childNodes[0].nodeValue = "拍照／選取照片" + (currentCount > 0 ? " (" + currentCount + "/2)" : "");
+      }
     }
 
     async function saveStudentDraft() {
@@ -3122,34 +3153,89 @@
     }
 
     async function handleStudentPhotos(event) {
-      const files = Array.from(event.target.files || []).slice(0, MAX_IMAGE_COUNT);
-      if (!files.length) return;
+      const existingCount = (state.activeStudentImages ? state.activeStudentImages.length : 0) + (state.pendingStudentImages ? state.pendingStudentImages.length : 0);
+      const remainingSlots = Math.max(0, MAX_IMAGE_COUNT - existingCount);
+      if (remainingSlots <= 0) {
+        showToast("每個回答最多上傳 2 張照片，請先刪除既有照片再新增。", "warning");
+        event.target.value = "";
+        return;
+      }
+      const rawFiles = Array.from(event.target.files || []);
+      if (!rawFiles.length) return;
+      const files = rawFiles.slice(0, remainingSlots);
+      if (rawFiles.length > remainingSlots) {
+        showToast("已為你選取前 " + remainingSlots + " 張照片（上限 2 張）。", "info");
+      }
       try {
-        const images = [];
-        for (const file of files) images.push(await compressImage(file));
-        state.pendingStudentImages = images;
+        const compressed = [];
+        for (const file of files) compressed.push(await compressImage(file));
+        state.pendingStudentImages = (state.pendingStudentImages || []).concat(compressed);
         await saveStudentDraft();
         renderPendingPhotoPreview();
+        updatePhotoUploadButton();
         showToast("照片已壓縮並暫存。", "success");
       } catch (error) {
         await showModal("照片無法上傳", error.message || "請換一張照片再試。", "error");
+      } finally {
+        event.target.value = "";
       }
     }
 
     function renderPendingPhotoPreview() {
       const container = document.getElementById("newPhotoPreview");
       if (!container) return;
-      container.innerHTML = state.pendingStudentImages.map(function (image) { return "<div class=\"photo-thumb\"><img src=\"" + image.data + "\" alt=\"待上傳答案照片\"></div>"; }).join("");
+      container.innerHTML = (state.pendingStudentImages || []).map(function (image, index) {
+        return "<div class=\"photo-thumb\"><img src=\"" + image.data + "\" alt=\"待上傳答案照片\"><button class=\"photo-delete-btn\" data-delete-pending-idx=\"" + index + "\" type=\"button\" title=\"刪除這張照片\" aria-label=\"刪除照片\">×</button></div>";
+      }).join("");
+      container.querySelectorAll("[data-delete-pending-idx]").forEach(function (btn) {
+        btn.addEventListener("click", async function (e) {
+          e.stopPropagation();
+          const idx = Number(btn.dataset.deletePendingIdx);
+          if (!isNaN(idx) && idx >= 0 && idx < state.pendingStudentImages.length) {
+            state.pendingStudentImages.splice(idx, 1);
+            await saveStudentDraft();
+            renderPendingPhotoPreview();
+            updatePhotoUploadButton();
+            showToast("已移除暫存照片。", "info");
+          }
+        });
+      });
       const sidebar = document.querySelector(".student-workspace .workspace-sidebar");
       if (sidebar && state.pendingStudentImages.length) {
-        window.setTimeout(function () { sidebar.scrollTop = sidebar.scrollHeight; }, 60);
+        window.setTimeout(function () {
+          const actions = sidebar.querySelector(".answer-actions");
+          if (actions) actions.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }, 60);
       }
     }
 
     function renderExistingPhotoPreview() {
       const container = document.getElementById("existingPhotoPreview");
-      if (!container || !state.activeStudentImages.length) return;
-      container.innerHTML = "<p class=\"helper\" style=\"margin-top:12px;\">目前已保存的照片</p><div class=\"photo-preview-grid\">" + state.activeStudentImages.map(function (image) { return "<div class=\"photo-thumb\"><img src=\"" + image.dataUrl + "\" alt=\"已保存答案照片\"></div>"; }).join("") + "</div>";
+      if (!container) return;
+      if (!state.activeStudentImages || !state.activeStudentImages.length) {
+        container.innerHTML = "";
+        return;
+      }
+      container.innerHTML = "<p class=\"helper\" style=\"margin-top:12px;\">目前已保存的照片（可點擊「×」刪除）：</p><div class=\"photo-preview-grid\">" + state.activeStudentImages.map(function (image) {
+        return "<div class=\"photo-thumb\"><img src=\"" + image.dataUrl + "\" alt=\"已保存答案照片\"><button class=\"photo-delete-btn\" data-delete-existing-id=\"" + escapeHtml(image.id) + "\" type=\"button\" title=\"刪除這張照片\" aria-label=\"刪除照片\">×</button></div>";
+      }).join("") + "</div>";
+      container.querySelectorAll("[data-delete-existing-id]").forEach(function (btn) {
+        btn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          const targetId = btn.dataset.deleteExistingId;
+          state.activeStudentImages = (state.activeStudentImages || []).filter(function (img) { return img.id !== targetId; });
+          const keepIdx = (state.keepStudentImageIds || []).indexOf(targetId);
+          if (keepIdx > -1) {
+            state.keepStudentImageIds.splice(keepIdx, 1);
+            if (state.keepStudentImageNames && state.keepStudentImageNames.length > keepIdx) {
+              state.keepStudentImageNames.splice(keepIdx, 1);
+            }
+          }
+          renderExistingPhotoPreview();
+          updatePhotoUploadButton();
+          showToast("已移除照片，請點擊「更新答案」以保存變更。", "info");
+        });
+      });
     }
 
     async function renderStudentFeedbackPreview(submission) {
@@ -3220,9 +3306,12 @@
       if (!nickname) { await showModal("請先填寫暱稱", "教師需要用暱稱辨識你的作答。", "warning"); document.getElementById("studentNicknameField").focus(); return; }
       if (!state.activeAreaId || !textField) return;
       const submission = state.studentSubmissions.get(state.activeAreaId);
-      const keepIds = submission && Array.isArray(submission.imageFileIds) ? submission.imageFileIds : [];
-      const keepNames = submission && Array.isArray(submission.imageFileNames) ? submission.imageFileNames : [];
-      if (!textField.value.trim() && !state.pendingStudentImages.length && !keepIds.length) { await showModal("答案還是空的", "請輸入文字或拍照上傳答案。", "warning"); return; }
+      const keepIds = Array.isArray(state.keepStudentImageIds) ? state.keepStudentImageIds : (submission && Array.isArray(submission.imageFileIds) ? submission.imageFileIds.slice(0, MAX_IMAGE_COUNT) : []);
+      const keepNames = Array.isArray(state.keepStudentImageNames) ? state.keepStudentImageNames : (submission && Array.isArray(submission.imageFileNames) ? submission.imageFileNames.slice(0, MAX_IMAGE_COUNT) : []);
+      if (!textField.value.trim() && (!state.pendingStudentImages || !state.pendingStudentImages.length) && (!keepIds || !keepIds.length)) {
+        await showModal("答案還是空的", "請輸入文字或拍照上傳答案。", "warning");
+        return;
+      }
       const payload = { id: submissionIdFor(state.boardId, state.activeAreaId, nickname), boardId: state.boardId, areaId: state.activeAreaId, nickname: nickname, text: textField.value.trim(), images: state.pendingStudentImages, keepImageFileIds: keepIds, keepImageFileNames: keepNames, clientId: state.clientId, draftKey: state.activeDraftKey };
       try {
         const result = await commitLocalMutation("saveSubmission", payload);
@@ -3708,30 +3797,52 @@
     function setupReviewInkControls() {
       const toolbar = document.querySelector(".review-toolbar");
       if (!toolbar) return;
-      if (!document.getElementById("reviewToolField")) {
+      if (!document.getElementById("reviewToolPen")) {
         const controls = document.createElement("div");
+        controls.id = "reviewInkControls";
         controls.className = "ink-controls review-ink-controls";
-        controls.innerHTML = "<label>工具<select id=\"reviewToolField\"><option value=\"pen\">手寫筆</option><option value=\"highlighter\">螢光筆</option><option value=\"shape\">圖形</option><option value=\"eraser\">橡皮擦</option></select></label><label id=\"reviewShapeLabel\">形狀<select id=\"reviewShapeField\"><option value=\"arrow\">箭頭</option><option value=\"line\">直線</option><option value=\"rect\">矩形</option><option value=\"circle\">圓形</option></select></label><button class=\"button small danger\" id=\"clearAllReviewStrokesButton\" type=\"button\">全部清除</button>";
+        controls.innerHTML = "<button class=\"ink-icon-button active\" data-review-tool=\"pen\" type=\"button\" title=\"手寫筆\" aria-label=\"手寫筆\">✎</button><button class=\"ink-icon-button\" id=\"reviewToolPen\" data-review-tool=\"pen\" type=\"button\" style=\"display:none\"></button><button class=\"ink-icon-button\" data-review-tool=\"highlighter\" type=\"button\" title=\"螢光筆\" aria-label=\"螢光筆\">▰</button><button class=\"ink-icon-button\" data-review-tool=\"shape\" type=\"button\" title=\"圖形\" aria-label=\"圖形\">◇</button><span class=\"ink-shape-buttons\" id=\"reviewShapeButtons\" hidden><button class=\"ink-icon-button\" data-review-shape=\"arrow\" type=\"button\" title=\"箭頭\" aria-label=\"箭頭\">➜</button><button class=\"ink-icon-button\" data-review-shape=\"line\" type=\"button\" title=\"直線\" aria-label=\"直線\">╱</button><button class=\"ink-icon-button\" data-review-shape=\"rect\" type=\"button\" title=\"矩形\" aria-label=\"矩形\">□</button><button class=\"ink-icon-button\" data-review-shape=\"circle\" type=\"button\" title=\"圓形\" aria-label=\"圓形\">○</button></span><button class=\"ink-icon-button\" data-review-tool=\"eraser\" type=\"button\" title=\"橡皮擦\" aria-label=\"橡皮擦\">⌫</button><span class=\"ink-palette\" aria-label=\"常用顏色\"><button class=\"ink-swatch active\" data-review-color=\"#c47f78\" style=\"background:#c47f78\" type=\"button\" title=\"豆沙玫瑰\" aria-label=\"豆沙玫瑰\"></button><button class=\"ink-swatch\" data-review-color=\"#9eaaa0\" style=\"background:#9eaaa0\" type=\"button\" title=\"鼠尾草綠\" aria-label=\"鼠尾草綠\"></button><button class=\"ink-swatch\" data-review-color=\"#91a6b5\" style=\"background:#91a6b5\" type=\"button\" title=\"霧藍\" aria-label=\"霧藍\"></button><button class=\"ink-swatch\" data-review-color=\"#a99db8\" style=\"background:#a99db8\" type=\"button\" title=\"灰紫\" aria-label=\"灰紫\"></button><button class=\"ink-swatch\" data-review-color=\"#c1a477\" style=\"background:#c1a477\" type=\"button\" title=\"奶茶棕\" aria-label=\"奶茶棕\"></button></span>";
         toolbar.insertBefore(controls, toolbar.firstChild);
-      }
-      const tool = document.getElementById("reviewToolField");
-      const shape = document.getElementById("reviewShapeField");
-      if (tool && tool.dataset.bound !== "1") {
-        tool.dataset.bound = "1";
-        tool.addEventListener("change", function (event) { state.reviewTool = event.target.value; updateReviewInkControls(); });
-        shape.addEventListener("change", function (event) { state.reviewShape = event.target.value; });
-        document.getElementById("clearAllReviewStrokesButton").addEventListener("click", clearAllReviewStrokes);
+        controls.querySelectorAll("[data-review-tool]").forEach(function (btn) {
+          if (btn.id === "reviewToolPen") return;
+          btn.addEventListener("click", function () {
+            state.reviewTool = btn.dataset.reviewTool;
+            updateReviewInkControls();
+          });
+        });
+        controls.querySelectorAll("[data-review-shape]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            state.reviewShape = btn.dataset.reviewShape;
+            updateReviewInkControls();
+          });
+        });
+        controls.querySelectorAll("[data-review-color]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            state.reviewColor = btn.dataset.reviewColor;
+            const colorField = document.getElementById("reviewColorField");
+            if (colorField) colorField.value = state.reviewColor;
+            updateReviewInkControls();
+          });
+        });
       }
       updateReviewInkControls();
     }
 
     function updateReviewInkControls() {
-      const tool = document.getElementById("reviewToolField");
-      const shape = document.getElementById("reviewShapeField");
-      const shapeLabel = document.getElementById("reviewShapeLabel");
-      if (tool) tool.value = state.reviewTool;
-      if (shape) shape.value = state.reviewShape;
-      if (shapeLabel) shapeLabel.style.display = state.reviewTool === "shape" ? "inline-flex" : "none";
+      document.querySelectorAll("[data-review-tool]").forEach(function (item) {
+        if (item.id === "reviewToolPen") return;
+        item.classList.toggle("active", item.dataset.reviewTool === state.reviewTool);
+      });
+      document.querySelectorAll("[data-review-shape]").forEach(function (item) {
+        item.classList.toggle("active", item.dataset.reviewShape === state.reviewShape);
+      });
+      document.querySelectorAll("[data-review-color]").forEach(function (item) {
+        item.classList.toggle("active", item.dataset.reviewColor && item.dataset.reviewColor.toLowerCase() === state.reviewColor.toLowerCase());
+      });
+      const shapeButtons = document.getElementById("reviewShapeButtons");
+      if (shapeButtons) shapeButtons.hidden = state.reviewTool !== "shape";
+      const colorField = document.getElementById("reviewColorField");
+      if (colorField) colorField.value = state.reviewColor;
     }
 
     async function loadReviewImages() {

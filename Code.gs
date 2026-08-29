@@ -353,16 +353,55 @@ function getOrCreateRootFolder_() {
   return getOrCreateFolder_(getSetting_("DriveRootFolderName") || "PDF互動講義檔案", spreadsheetParent_());
 }
 
+function boardFolderName_(board) {
+  if (!board) return "未命名教材";
+  const name = cleanText_(board.name, 60) || "未命名教材";
+  return safeFileName_("【" + name + "】");
+}
+
+function getBoardByIdQuiet_(boardId) {
+  if (!boardId) return null;
+  try {
+    const boards = readTable_("boards");
+    return boards.find(function (b) { return String(b.id) === String(boardId); }) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function getOrCreateBoardFolder_(boardId) {
-  return getOrCreateFolder_(safeFileName_(boardId), getOrCreateRootFolder_());
+  const root = getOrCreateRootFolder_();
+  const board = getBoardByIdQuiet_(boardId);
+  const targetName = board ? boardFolderName_(board) : safeFileName_(boardId);
+  
+  const targetFolders = root.getFoldersByName(targetName);
+  if (targetFolders.hasNext()) return targetFolders.next();
+  
+  const legacyFolders = root.getFoldersByName(safeFileName_(boardId));
+  if (legacyFolders.hasNext()) {
+    const legacyFolder = legacyFolders.next();
+    try { legacyFolder.setName(targetName); } catch (e) {}
+    return legacyFolder;
+  }
+  
+  return root.createFolder(targetName);
 }
 
 function getBoardFolderIfExists_(boardId) {
   const parent = spreadsheetParent_();
   const rootFolders = parent.getFoldersByName(getSetting_("DriveRootFolderName") || "PDF互動講義檔案");
   if (!rootFolders.hasNext()) return null;
-  const folders = rootFolders.next().getFoldersByName(safeFileName_(boardId));
-  return folders.hasNext() ? folders.next() : null;
+  const root = rootFolders.next();
+  const board = getBoardByIdQuiet_(boardId);
+  const targetName = board ? boardFolderName_(board) : safeFileName_(boardId);
+  
+  const targetFolders = root.getFoldersByName(targetName);
+  if (targetFolders.hasNext()) return targetFolders.next();
+  
+  const legacyFolders = root.getFoldersByName(safeFileName_(boardId));
+  if (legacyFolders.hasNext()) return legacyFolders.next();
+  
+  return null;
 }
 
 function decodeBase64_(value) {
@@ -626,7 +665,8 @@ function createBoard_(payload) {
   };
   appendRow_("boards", board);
   if (payload.pdf && payload.pdf.data) {
-    const file = saveDriveFile_(payload.pdf, "PDF教材", board.id, "");
+    const pdfName = safeFileName_(name + "_" + (payload.pdf.name || "講義.pdf"));
+    const file = saveDriveFile_(Object.assign({}, payload.pdf, { name: pdfName }), "PDF教材", board.id, "");
     updateRow_("boards", board.id, { pdfFileId: file.driveId, pdfFileName: file.name, pdfMime: file.mime, updatedAt: now_() });
     board.pdfFileId = file.driveId;
     board.pdfFileName = file.name;
@@ -676,10 +716,15 @@ function updateBoard_(payload) {
   if (payload.name !== undefined) {
     fields.name = cleanText_(payload.name, MAX_TEXT.name);
     if (!fields.name) throw new Error("教材版面名稱不可為空白。");
+    try {
+      const folder = getBoardFolderIfExists_(board.id);
+      if (folder) folder.setName(boardFolderName_({ name: fields.name }));
+    } catch (e) {}
   }
   if (payload.description !== undefined) fields.description = cleanText_(payload.description, MAX_TEXT.description);
   if (payload.pdf && payload.pdf.data) {
-    const file = saveDriveFile_(payload.pdf, "PDF教材", board.id, "");
+    const pdfName = safeFileName_((fields.name || board.name || "教材") + "_" + (payload.pdf.name || "講義.pdf"));
+    const file = saveDriveFile_(Object.assign({}, payload.pdf, { name: pdfName }), "PDF教材", board.id, "");
     fields.pdfFileId = file.driveId;
     fields.pdfFileName = file.name;
     fields.pdfMime = file.mime;
@@ -753,10 +798,14 @@ function saveSubmission_(payload) {
   if (!nickname) throw new Error("請先輸入暱稱。");
   const id = cleanText_(payload.id, 120) || makeId_("S");
   const existing = readTable_("submissions").find(function (item) { return String(item.id) === id; });
-  const imageIds = parseArray_(payload.keepImageFileIds);
-  const imageNames = parseArray_(payload.keepImageFileNames);
-  parseArray_(payload.images).slice(0, 3).forEach(function (image) {
-    const file = saveDriveFile_(image, "學生答案照片", board.id, id);
+  const imageIds = parseArray_(payload.keepImageFileIds).slice(0, 2);
+  const imageNames = parseArray_(payload.keepImageFileNames).slice(0, 2);
+  const rawImages = parseArray_(payload.images);
+  const remainingSlots = Math.max(0, 2 - imageIds.length);
+  rawImages.slice(0, remainingSlots).forEach(function (image, idx) {
+    const customName = nickname + "_" + (cleanText_(area.title, 30) || "問答") + "_第" + (imageIds.length + 1) + "張.jpg";
+    const filePayload = Object.assign({}, image, { name: customName });
+    const file = saveDriveFile_(filePayload, "學生答案照片", board.id, id);
     imageIds.push(file.driveId);
     imageNames.push(file.name);
   });
@@ -767,8 +816,8 @@ function saveSubmission_(payload) {
     areaId: area.id,
     nickname: nickname,
     text: cleanText_(payload.text, MAX_TEXT.answer),
-    imageFileIds: JSON.stringify(imageIds.slice(0, 3)),
-    imageFileNames: JSON.stringify(imageNames.slice(0, 3)),
+    imageFileIds: JSON.stringify(imageIds.slice(0, 2)),
+    imageFileNames: JSON.stringify(imageNames.slice(0, 2)),
     teacherStrokes: "",
     teacherComment: "",
     status: "待批改",
