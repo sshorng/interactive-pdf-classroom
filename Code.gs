@@ -810,6 +810,45 @@ function saveFeedback_(payload) {
   return { ok: true, submissionId: item.id, feedback: feedback, updatedAt: now_() };
 }
 
+function deleteSubmission_(payload) {
+  requireManager_(payload);
+  const submissionId = cleanText_(payload.submissionId, 120);
+  if (!submissionId) throw new Error("缺少作答紀錄 ID。");
+  const rows = readTable_("submissions");
+  const item = rows.find(function (row) { return String(row.id) === submissionId; });
+  if (!item) return { ok: true, submissionId: submissionId, deleted: 0 };
+
+  const driveIds = submissionDriveIds_(item);
+  readTable_("files").filter(function (file) {
+    return String(file.boardId) === String(item.boardId) && String(file.submissionId) === submissionId;
+  }).forEach(function (file) {
+    if (file.driveId) driveIds.push(String(file.driveId));
+  });
+
+  const remainingSubmissions = rows.filter(function (row) { return String(row.id) !== submissionId; });
+  const remainingDriveIds = {};
+  remainingSubmissions.forEach(function (sub) {
+    submissionDriveIds_(sub).forEach(function (dId) { remainingDriveIds[dId] = true; });
+  });
+
+  driveIds.forEach(function (driveId) {
+    if (remainingDriveIds[driveId]) return;
+    try {
+      DriveApp.getFileById(driveId).setTrashed(true);
+    } catch (error) {}
+  });
+
+  deleteRows_("files", function (file) {
+    return String(file.boardId) === String(item.boardId) && String(file.submissionId) === submissionId;
+  });
+
+  const deleted = deleteRows_("submissions", function (row) {
+    return String(row.id) === submissionId;
+  });
+
+  return { ok: true, submissionId: submissionId, boardId: item.boardId, areaId: item.areaId, deleted: deleted };
+}
+
 function getFile_(payload) {
   const fileId = cleanText_(payload.fileId, 160);
   if (!fileId) throw new Error("缺少檔案 ID。");
@@ -883,6 +922,7 @@ function doPost(e) {
     else if (action === "classroomSync") result = classroomSync_(payload);
     else if (action === "saveClassroomState") result = withLock_(function () { return saveClassroomState_(payload); });
     else if (action === "saveSubmission") result = withLock_(function () { return saveSubmission_(payload); });
+    else if (action === "deleteSubmission") result = withLock_(function () { return deleteSubmission_(payload); });
     else if (action === "listSubmissions") result = listSubmissions_(payload);
     else if (action === "saveFeedback") result = withLock_(function () { return saveFeedback_(payload); });
     else if (action === "getFile") result = getFile_(payload);
