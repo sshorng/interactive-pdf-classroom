@@ -215,13 +215,12 @@
     .toolbar-button { min-width: 40px; min-height: 40px; padding: 7px 11px; color: var(--teal-dark); background: rgba(255,255,255,.62); border: 1px solid #d5d5cb; border-radius: 10px; }
     .toolbar-button:hover { background: #fff; border-color: #aac6ba; }
     .toolbar-button.active { color: #fffaf4; background: var(--accent); border-color: var(--accent); }
-    .pdf-scroll { min-height: 620px; overflow: auto; padding: 34px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-x pan-y; }
+    .pdf-scroll { min-height: 620px; overflow: auto; padding: 34px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-x pan-y pinch-zoom; }
     .page-stage { position: relative; width: max-content; min-width: 340px; min-height: 440px; margin: 0 auto; background: #fff; box-shadow: 0 18px 38px rgba(38, 45, 41, .18); }
     .page-stage canvas { display: block; }
     .zone-layer { position: absolute; inset: 0; pointer-events: none; touch-action: auto; z-index: 4; }
     .zone-layer .zone { pointer-events: auto; }
     .zone-layer.is-placing { pointer-events: auto; cursor: crosshair; touch-action: none; }
-    .zone-layer.ink-mode { pointer-events: none; }
     .zone { position: absolute; z-index: 2; display: grid; place-items: center; width: 32px; height: 32px; min-width: 32px; max-width: 32px; padding: 0; overflow: visible; color: #fffaf4; background: var(--accent); border: 2px solid #fff8ee; border-radius: 50% 50% 50% 0; text-align: center; box-shadow: 0 5px 14px rgba(49,95,89,.25); transform: translate(-50%, -50%) rotate(-45deg); }
     .zone::before, .zone::after { content: none; }
     .zone:hover, .zone.selected { background: var(--teal); border-color: #fff; transform: translate(-50%, -50%) rotate(-45deg) scale(1.08); }
@@ -230,9 +229,8 @@
     .zone-status { display: none; }
     body.editor-mode .zone { cursor: grab; touch-action: none; }
     body.editor-mode .zone:active { cursor: grabbing; }
-    .ink-layer { position: absolute; inset: 0; z-index: 3; display: none; width: 100%; height: 100%; touch-action: pan-x pan-y; user-select: none; -webkit-user-select: none; }
+    .ink-layer { position: absolute; inset: 0; z-index: 3; display: none; width: 100%; height: 100%; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
     .page-stage .ink-layer.visible { display: block; }
-    .page-stage .ink-layer.is-drawing { display: block; cursor: crosshair; touch-action: none; }
     .ink-controls { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 4px; min-width: max-content; }
     .ink-icon-button, .ink-swatch { display: inline-grid; flex: 0 0 auto; place-items: center; width: 36px; height: 36px; padding: 0; color: var(--teal-dark); background: rgba(255,255,255,.72); border: 1px solid #d5d5cb; border-radius: 9px; font-size: 18px; }
     .ink-icon-button:hover, .ink-icon-button.active { color: #fffaf4; background: var(--teal); border-color: var(--teal); }
@@ -360,10 +358,10 @@
     .classroom-modal-layout #clearAllReviewStrokesButton { display: none; }
     .review-ink-controls { min-width: 0; gap: 5px; }
     .review-ink-controls select { min-height: 32px; width: auto; padding: 5px 8px; }
-    .classroom-modal-layout .review-image-stage { position: relative; width: 100%; max-width: 100%; max-height: min(62vh, 720px); overflow: auto; margin: 0 auto 10px; background: #eeeae0; border: 1px solid var(--line); border-radius: 13px; text-align: center; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; }
+    .classroom-modal-layout .review-image-stage { position: relative; width: 100%; max-width: 100%; max-height: min(62vh, 720px); overflow: auto; margin: 0 auto 10px; background: #eeeae0; border: 1px solid var(--line); border-radius: 13px; text-align: center; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y pinch-zoom; }
     .classroom-modal-layout .review-image-wrap { position: relative; display: inline-block; margin: 0 auto; width: fit-content; min-width: 200px; transform-origin: center top; }
     .classroom-modal-layout .review-image-wrap img { display: block; max-width: min(900px, 100%); max-height: min(62vh, 700px); width: auto; height: auto; border-radius: 6px; }
-    .classroom-modal-layout .review-image-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; border-radius: 6px; }
+    .classroom-modal-layout .review-image-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: pan-x pan-y pinch-zoom; border-radius: 6px; }
     .classroom-pdf-panel { position: relative; }
     .classroom-toolbar-title { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin-right: 8px; color: var(--teal-dark); font-size: 13px; font-weight: 800; white-space: nowrap; }
     .classroom-toolbar-title button { min-height: 40px; padding: 7px 10px; color: var(--teal-dark); background: transparent; border: 1px solid #d5d5cb; border-radius: 9px; }
@@ -400,7 +398,7 @@
     body.classroom-mode .classroom-layout { height: 100vh; max-height: 100vh; min-height: 0; grid-template-columns: 1fr; border-radius: 0; border: none; }
     body.classroom-mode .classroom-pdf-panel { min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; position: relative; }
     body.classroom-mode .classroom-pdf-panel .pdf-toolbar { position: absolute; top: 0; right: 0; left: 0; z-index: 10; max-height: 116px; overflow-x: auto; overflow-y: hidden; padding: 6px 10px; background: rgba(239, 237, 230, .94); backdrop-filter: blur(14px); justify-content: flex-start; align-items: center; gap: 8px; flex-wrap: nowrap; white-space: nowrap; }
-    body.classroom-mode .classroom-pdf-panel .pdf-scroll { flex: 1; height: 100%; min-height: 0; overflow-y: auto; overflow-x: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; padding: 78px 28px 76px; }
+    body.classroom-mode .classroom-pdf-panel .pdf-scroll { flex: 1; height: 100%; min-height: 0; overflow-y: auto; overflow-x: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y pinch-zoom; padding: 78px 28px 76px; }
     body.classroom-mode .classroom-sidebar { display: none; }
     body.classroom-mode .ink-controls { gap: 4px; }
     body.classroom-mode .ink-controls select { min-height: 36px; }
@@ -432,7 +430,7 @@
     .review-image-stage { position: relative; width: fit-content; max-width: 100%; max-height: 540px; overflow: auto; margin: 0 auto 15px; background: #eeeae0; border: 1px solid var(--line); border-radius: 13px; }
     .review-image-wrap { position: relative; width: fit-content; min-width: 260px; }
     .review-image-wrap img { display: block; max-width: min(760px, 100%); max-height: 530px; width: auto; height: auto; }
-    .review-image-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+    .review-image-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: pan-x pan-y pinch-zoom; }
     .review-text-answer { margin-bottom: 15px; padding: 15px; color: var(--ink); background: #f7f5ef; border-radius: 12px; white-space: pre-wrap; }
     .photo-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
     .photo-tab { min-height: 36px; padding: 6px 10px; color: var(--muted); background: #f5f3ec; border: 1px solid var(--line); border-radius: 9px; }
@@ -618,12 +616,11 @@
       activeDraftKey: "",
       teacherInk: new Map(),
       teacherInkVersion: "",
-      drawingInk: false,
       inkTool: "pen",
       previousInkTool: "pen",
       inkShape: "arrow",
       inkColor: "#c47f78",
-      inkWidth: 2,
+      inkWidth: 4,
       inkSaveTimer: null,
       classroomStateTimer: null,
       submissions: [],
@@ -634,7 +631,7 @@
       reviewStrokes: [],
       reviewComment: "",
       reviewColor: "#d34f42",
-      reviewWidth: 2,
+      reviewWidth: 4,
       reviewTool: "pen",
       previousReviewTool: "pen",
       reviewShape: "arrow",
@@ -1043,7 +1040,7 @@
       const text = indicator.querySelector(".pull-text");
 
       window.addEventListener("touchstart", function (event) {
-        if (isRefreshing || state.drawingInk || event.touches.length !== 1) return;
+        if (isRefreshing || event.touches.length !== 1) return;
         if (state.view !== "manager") return;
         const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
         const target = event.target;
@@ -1707,7 +1704,7 @@
       const route = readRoute();
       state.view = ["manager", "editor", "review", "student"].indexOf(route.view) > -1 ? route.view : "manager";
       state.boardId = route.boardId;
-      if (state.view !== "review") { state.drawingInk = false; state.drawingZone = false; }
+      if (state.view !== "review") state.drawingZone = false;
        document.body.classList.toggle("classroom-mode", state.view === "review" && Boolean(state.boardId));
        document.body.classList.toggle("student-mode", state.view === "student" && Boolean(state.boardId));
        document.body.classList.toggle("editor-mode", state.view === "editor" && Boolean(state.boardId));
@@ -1844,7 +1841,7 @@
      }
 
     function bindTeacherInkToolbarEvents() {
-      const actions = { teacherInkButton: toggleTeacherInk, undoTeacherInkButton: undoTeacherInk, clearTeacherInkButton: clearTeacherInk, clearAllTeacherInkButton: clearAllTeacherInk };
+       const actions = { undoTeacherInkButton: undoTeacherInk, clearTeacherInkButton: clearTeacherInk, clearAllTeacherInkButton: clearAllTeacherInk };
       Object.keys(actions).forEach(function (id) {
         const button = document.getElementById(id);
         if (!button || button.dataset.bound === "1") return;
@@ -1862,15 +1859,15 @@
       if (editorHead) {
         const heading = editorHead.querySelector("h2");
         const instruction = editorHead.querySelector("p:not(.eyebrow)");
-         if (heading) heading.textContent = includeInk ? "課堂 PDF 手寫" : "設定問答區";
-         if (instruction) instruction.textContent = includeInk ? "可用觸控筆在 PDF 上書寫，雙擊頁面可快速開關手寫模式。" : "點擊 PDF 放置問答圖釘，系統會先套用預設標題。";
+          if (heading) heading.textContent = includeInk ? "課堂 PDF" : "設定問答區";
+          if (instruction) instruction.textContent = includeInk ? "觸控筆可直接書寫，手指可捲動與捏合縮放。" : "點擊 PDF 放置問答圖釘，系統會先套用預設標題。";
       }
       const zoneLayer = document.getElementById("zoneLayer");
       if (!document.getElementById("inkCanvas")) {
         const canvas = document.createElement("canvas");
         canvas.id = "inkCanvas";
         canvas.className = "ink-layer";
-        canvas.style.touchAction = state.drawingInk ? "none" : "pan-x pan-y";
+        canvas.style.touchAction = "pan-x pan-y pinch-zoom";
         canvas.style.willChange = "transform";
         stage.insertBefore(canvas, zoneLayer || null);
       }
@@ -1878,14 +1875,6 @@
       if (!includeInk) {
         updateInkControls();
         return;
-      }
-      if (!document.getElementById("teacherInkButton")) {
-        const button = document.createElement("button");
-        button.className = "toolbar-button";
-        button.id = "teacherInkButton";
-        button.type = "button";
-        button.textContent = "✎ 手寫";
-        toolbar.appendChild(button);
       }
       if (!document.getElementById("inkControls")) {
         const controls = document.createElement("div");
@@ -1909,44 +1898,7 @@
        panel.appendChild(navigation);
      }
 
-     function isInkGestureExcludedTarget(target) {
-       const element = target && target.nodeType === 1 ? target : target && target.parentElement;
-       return Boolean(element && element.closest && element.closest(".zone, button, input, select, textarea, label, a, .classroom-page-nav"));
-     }
-
-     function toggleTeacherInkFromGesture(event) {
-       if ((state.view !== "review" && state.view !== "editor") || !state.board || !state.pdf || isInkGestureExcludedTarget(event.target)) return false;
-       if (event && typeof event.preventDefault === "function") event.preventDefault();
-       setTeacherInkMode(!state.drawingInk);
-       return true;
-     }
-
-     function bindTeacherInkToggleGesture(scroll) {
-       if (!scroll || scroll.dataset.inkGestureBound === "1") return;
-       scroll.dataset.inkGestureBound = "1";
-       let lastTouchTap = null;
-       let ignoreNativeDblClickUntil = 0;
-       scroll.addEventListener("dblclick", function (event) {
-         if (performance.now() < ignoreNativeDblClickUntil) return;
-         toggleTeacherInkFromGesture(event);
-       });
-       scroll.addEventListener("pointerup", function (event) {
-         if (event.pointerType !== "touch") return;
-         if (isInkGestureExcludedTarget(event.target)) { lastTouchTap = null; return; }
-         const now = performance.now();
-         const point = { x: event.clientX, y: event.clientY };
-         if (lastTouchTap && now - lastTouchTap.time <= 350 && Math.hypot(point.x - lastTouchTap.x, point.y - lastTouchTap.y) <= 40) {
-           lastTouchTap = null;
-           ignoreNativeDblClickUntil = now + 500;
-           toggleTeacherInkFromGesture(event);
-         } else {
-           lastTouchTap = { x: point.x, y: point.y, time: now };
-         }
-       });
-       scroll.addEventListener("pointercancel", function () { lastTouchTap = null; });
-     }
-
-    function bindPdfSwipe(scroll) {
+     function bindPdfSwipe(scroll) {
       if (!scroll || scroll.dataset.swipeBound === "1") return;
       scroll.dataset.swipeBound = "1";
       let startTouch = null;
@@ -1963,7 +1915,7 @@
       }
 
       scroll.addEventListener("touchstart", function (event) {
-        if (state.drawingInk) return;
+        if (teacherInkActivePointerId !== null) return;
         if (event.touches.length === 2) {
           isPinching = true;
           startTouch = null;
@@ -1982,7 +1934,7 @@
       }, { passive: false });
 
       scroll.addEventListener("touchmove", function (event) {
-        if (state.drawingInk) return;
+        if (teacherInkActivePointerId !== null) return;
         if (event.touches.length === 2 && isPinching && initialPinchDistance > 0) {
           event.preventDefault();
           const currDist = getPinchDist(event);
@@ -2014,7 +1966,7 @@
           }
           return;
         }
-        if (!startTouch || state.drawingInk || !event.changedTouches.length) {
+        if (!startTouch || teacherInkActivePointerId !== null || !event.changedTouches.length) {
           startTouch = null;
           return;
         }
@@ -2071,47 +2023,25 @@
 
     function updateInkControls() {
       const color = document.getElementById("inkColorField");
-      const button = document.getElementById("teacherInkButton");
-      const shapeButtons = document.getElementById("inkShapeButtons");
+       const shapeButtons = document.getElementById("inkShapeButtons");
       document.querySelectorAll("[data-ink-tool]").forEach(function (item) { item.classList.toggle("active", item.dataset.inkTool === state.inkTool); });
       document.querySelectorAll("[data-ink-shape]").forEach(function (item) { item.classList.toggle("active", item.dataset.inkShape === state.inkShape); });
       document.querySelectorAll("[data-ink-color]").forEach(function (item) { item.classList.toggle("active", item.dataset.inkColor.toLowerCase() === state.inkColor.toLowerCase()); });
       document.querySelectorAll("[data-ink-width]").forEach(function (item) { item.classList.toggle("active", Number(item.dataset.inkWidth) === Number(state.inkWidth)); });
       if (color) color.value = state.inkColor;
       if (shapeButtons) shapeButtons.hidden = state.inkTool !== "shape";
-      if (button) { button.classList.toggle("active", state.drawingInk); button.textContent = state.drawingInk ? "停止手寫" : "✎ 手寫"; }
-      const canvas = document.getElementById("inkCanvas");
-      const layer = document.getElementById("zoneLayer");
-      if (canvas) {
-        canvas.classList.toggle("is-drawing", state.drawingInk);
-        canvas.style.touchAction = state.drawingInk ? "none" : "pan-x pan-y";
-      }
-      if (layer) layer.classList.toggle("ink-mode", state.drawingInk);
-    }
+       const canvas = document.getElementById("inkCanvas");
+       if (canvas) {
+         canvas.style.touchAction = "pan-x pan-y pinch-zoom";
+       }
+     }
 
-    function setInkStatus(message) {
+     function setInkStatus(message) {
       const status = document.getElementById("inkStatus");
       if (status) status.textContent = message;
     }
 
-    function setTeacherInkMode(enabled) {
-      state.drawingInk = Boolean(enabled);
-      if (state.drawingInk) {
-        state.drawingZone = false;
-        const pinButton = document.getElementById("drawZoneButton");
-        const layer = document.getElementById("zoneLayer");
-        if (pinButton) { pinButton.classList.remove("active"); pinButton.textContent = "＋ 放置圖釘"; }
-        if (layer) layer.classList.remove("is-placing");
-      }
-      updateInkControls();
-      renderTeacherInk();
-    }
-
-    function toggleTeacherInk() {
-      setTeacherInkMode(!state.drawingInk);
-    }
-
-    async function loadTeacherInk() {
+     async function loadTeacherInk() {
       state.teacherInk.clear();
       let result;
       try {
@@ -2259,7 +2189,6 @@
         return;
       }
       if (state.view === "review" || state.view === "editor") {
-        if (!state.drawingInk) setTeacherInkMode(true);
         if (state.inkTool !== "eraser") {
           state.previousInkTool = state.inkTool || "pen";
           state.inkTool = "eraser";
@@ -2288,7 +2217,7 @@
       const canvas = document.getElementById("inkCanvas");
       if (!canvas || canvas.dataset.bound === "1") return;
       canvas.dataset.bound = "1";
-      canvas.style.touchAction = state.drawingInk ? "none" : "pan-x pan-y";
+      canvas.style.touchAction = "pan-x pan-y pinch-zoom";
       canvas.style.willChange = "transform";
       canvas.addEventListener("pointerdown", beginTeacherInk);
       canvas.addEventListener("pointermove", moveTeacherInk);
@@ -2304,16 +2233,8 @@
     function beginTeacherInk(event) {
       if (!state.pdf) return;
       if (teacherInkActivePointerId !== null) return;
-      const isPen = event.pointerType === "pen";
-      const isDrawing = Boolean(state.drawingInk);
-      if (!isDrawing && !isPen) return;
-      if (event.pointerType === "touch") {
-        if (event.isPrimary === false) return;
-        if (event.width > 65 && event.height > 65) return;
-      }
-      if (!isDrawing && isPen) {
-        setTeacherInkMode(true);
-      }
+      if (event.pointerType === "touch") return;
+      if (event.pointerType !== "pen" && event.pointerType !== "mouse") return;
       event.preventDefault();
       teacherInkActivePointerId = event.pointerId;
       const canvas = document.getElementById("inkCanvas") || event.currentTarget;
@@ -2362,7 +2283,7 @@
       const isHighlighter = stroke.tool === "highlighter";
       const isPen = !isHighlighter && stroke.tool !== "eraser";
       let pressureScale = 1;
-      if (isPen && len >= 2) {
+      if (isPen && end >= 2) {
          const p1 = pts[end - 1];
          const p2 = pts[end];
         const avgPressure = ((p1.pressure !== undefined ? p1.pressure : 0.5) + (p2.pressure !== undefined ? p2.pressure : 0.5)) / 2;
@@ -2543,8 +2464,7 @@
       const teacherView = state.view === "editor" || state.view === "review" || state.view === "student";
       const strokes = teacherInkForPage(state.currentPage).slice();
       if (teacherInkActiveStroke) strokes.push(teacherInkActiveStroke);
-      canvas.classList.toggle("visible", teacherView && (strokes.length > 0 || state.drawingInk || state.view === "review" || state.view === "editor"));
-      canvas.classList.toggle("is-drawing", state.drawingInk);
+      canvas.classList.toggle("visible", teacherView && (strokes.length > 0 || state.view === "review" || state.view === "editor"));
       drawTeacherInkStrokes(canvas, strokes);
     }
 
@@ -2718,10 +2638,9 @@
        }
     }
 
-    function toggleZoneDrawing() {
-      state.drawingZone = !state.drawingZone;
-      if (state.drawingZone) setTeacherInkMode(false);
-      const button = document.getElementById("drawZoneButton");
+     function toggleZoneDrawing() {
+       state.drawingZone = !state.drawingZone;
+       const button = document.getElementById("drawZoneButton");
       if (button) { button.classList.toggle("active", state.drawingZone); button.textContent = state.drawingZone ? "正在放置，點一下完成" : "＋ 放置圖釘"; }
       const layer = document.getElementById("zoneLayer");
       if (layer) layer.classList.toggle("is-placing", state.drawingZone);
@@ -2860,7 +2779,7 @@
         const layer = document.getElementById("zoneLayer");
         layer.innerHTML = "";
         const inkCanvas = document.getElementById("inkCanvas");
-        if (inkCanvas) { inkCanvas.classList.remove("visible", "is-drawing"); inkCanvas.width = 1; inkCanvas.height = 1; }
+        if (inkCanvas) { inkCanvas.classList.remove("visible"); inkCanvas.width = 1; inkCanvas.height = 1; }
         let empty = stage.querySelector(".empty-pdf");
         if (!empty) {
           empty = document.createElement("div");
@@ -3638,9 +3557,8 @@
            if (state.board) openShareModal(state.board);
          });
        }
-       bindTeacherInkToolbarEvents();
-       bindTeacherInkCanvas();
-       bindTeacherInkToggleGesture(document.querySelector(".classroom-pdf-panel .pdf-scroll"));
+        bindTeacherInkToolbarEvents();
+        bindTeacherInkCanvas();
      }
 
     function renderReviewAreaList() {
@@ -4079,15 +3997,12 @@
     function bindReviewCanvas(canvas) {
       if (!canvas || canvas.dataset.bound === "1") return;
       canvas.dataset.bound = "1";
-      canvas.style.touchAction = "none";
+      canvas.style.touchAction = "pan-x pan-y pinch-zoom";
       canvas.style.willChange = "transform";
       canvas.addEventListener("pointerdown", function (event) {
         if (reviewActivePointerId !== null || isReviewPinching) return;
         const isPen = event.pointerType === "pen";
-        if (event.pointerType === "touch") {
-          if (event.isPrimary === false) return;
-          if (event.width > 65 && event.height > 65) return;
-        }
+        if (event.pointerType === "touch") return;
         event.preventDefault();
         reviewActivePointerId = event.pointerId;
         if (typeof canvas.setPointerCapture === "function") {
