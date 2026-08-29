@@ -354,8 +354,8 @@
     .classroom-modal-layout .review-toolbar input[type="color"] { width: 30px; height: 29px; }
     .classroom-modal-layout .review-toolbar input[type="range"] { width: 76px; }
     .classroom-modal-layout .review-toolbar .button.small { min-height: 32px; padding: 5px 8px; font-size: 12px; }
-    .classroom-modal-layout .review-toolbar .review-zoom-group { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px; background: #fff; border: 1px solid #d5d5cb; border-radius: 8px; }
-    .classroom-modal-layout .review-toolbar .review-zoom-group .toolbar-button { width: 28px; min-width: 28px; min-height: 28px; padding: 0; font-size: 15px; border-radius: 6px; }
+    .classroom-modal-layout .review-toolbar .review-zoom-group .toolbar-button { width: auto; min-width: 28px; min-height: 28px; padding: 0 4px; font-size: 14px; border-radius: 6px; white-space: nowrap; }
+    .classroom-modal-layout .review-toolbar .review-zoom-group #reviewZoomFitButton { padding: 0 6px; font-size: 12px; }
     .classroom-modal-layout .review-toolbar .review-zoom-group .toolbar-label { min-width: 42px; font-size: 11px; text-align: center; }
     .classroom-modal-layout #clearAllReviewStrokesButton { display: none; }
     .review-ink-controls { min-width: 0; gap: 5px; }
@@ -2281,6 +2281,8 @@
     let teacherInkStartPoint = null;
     let teacherInkMoved = false;
     let lastTeacherTipTap = null;
+    let teacherInkPreviewFrame = null;
+    let teacherInkRenderedPointCount = 0;
 
     function bindTeacherInkCanvas() {
       const canvas = document.getElementById("inkCanvas");
@@ -2323,6 +2325,11 @@
       teacherInkStartPoint = point;
       teacherInkMoved = false;
       teacherInkChanged = false;
+      teacherInkRenderedPointCount = 1;
+      if (teacherInkPreviewFrame !== null) {
+        cancelAnimationFrame(teacherInkPreviewFrame);
+        teacherInkPreviewFrame = null;
+      }
       if (state.inkTool === "eraser") {
         teacherInkErasing = true;
         eraseTeacherInkAt(point);
@@ -2332,15 +2339,23 @@
       renderTeacherInk();
     }
 
-    function drawLiveSegment(canvas, stroke) {
+    function appendCoalescedPoints(stroke, events, canvas) {
+      (events || []).forEach(function (item) {
+        const point = canvasPoint(item, canvas);
+        const last = stroke.points[stroke.points.length - 1];
+        if (!last || Math.hypot(point.x - last.x, point.y - last.y) > 0.00012) stroke.points.push(point);
+      });
+    }
+
+    function drawLiveSegment(canvas, stroke, endIndex) {
       if (!canvas || !stroke) return;
       const context = canvas.getContext("2d");
       const scale = window.devicePixelRatio || 1;
       const width = Number(canvas.dataset.logicalWidth || canvas.clientWidth || canvas.width / scale);
       const height = Number(canvas.dataset.logicalHeight || canvas.clientHeight || canvas.height / scale);
-      const pts = stroke.points;
-      const len = pts.length;
-      if (len < 2) return;
+       const pts = stroke.points;
+       const end = endIndex === undefined ? pts.length - 1 : Math.min(endIndex, pts.length - 1);
+       if (end < 1) return;
       context.save();
       context.scale(scale, scale);
       const baseWidth = Math.max(1, Number(stroke.width || .005) * Math.min(width, height));
@@ -2348,8 +2363,8 @@
       const isPen = !isHighlighter && stroke.tool !== "eraser";
       let pressureScale = 1;
       if (isPen && len >= 2) {
-        const p1 = pts[len - 2];
-        const p2 = pts[len - 1];
+         const p1 = pts[end - 1];
+         const p2 = pts[end];
         const avgPressure = ((p1.pressure !== undefined ? p1.pressure : 0.5) + (p2.pressure !== undefined ? p2.pressure : 0.5)) / 2;
         pressureScale = Math.max(0.7, Math.min(1.3, avgPressure * 0.8 + 0.6));
       }
@@ -2360,13 +2375,37 @@
       context.lineJoin = "round";
       if (isHighlighter) context.globalAlpha = .35;
       
-      const p0 = { x: pts[len - 2].x * width, y: pts[len - 2].y * height };
-      const p1 = { x: pts[len - 1].x * width, y: pts[len - 1].y * height };
-      context.beginPath();
-      context.moveTo(p0.x, p0.y);
-      context.lineTo(p1.x, p1.y);
-      context.stroke();
-      context.restore();
+       const previous = end > 1 ? pts[end - 2] : pts[end - 1];
+       const control = pts[end - 1];
+       const current = pts[end];
+       const p0 = { x: previous.x * width, y: previous.y * height };
+       const p1 = { x: control.x * width, y: control.y * height };
+       const p2 = { x: current.x * width, y: current.y * height };
+       context.beginPath();
+       if (end === 1) {
+         context.moveTo(p0.x, p0.y);
+         context.lineTo((p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
+       } else {
+         context.moveTo((p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
+         context.quadraticCurveTo(p1.x, p1.y, (p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
+       }
+       context.stroke();
+       context.restore();
+     }
+
+    function scheduleTeacherInkPreview(canvas) {
+      if (teacherInkPreviewFrame !== null) return;
+      teacherInkPreviewFrame = requestAnimationFrame(function () {
+        teacherInkPreviewFrame = null;
+        if (!teacherInkActiveStroke || !canvas || !canvas.isConnected) return;
+        const points = teacherInkActiveStroke.points || [];
+        if (teacherInkActiveStroke.tool === "pen") {
+          for (let index = Math.max(1, teacherInkRenderedPointCount); index < points.length; index += 1) drawLiveSegment(canvas, teacherInkActiveStroke, index);
+        } else {
+          renderTeacherInk();
+        }
+        teacherInkRenderedPointCount = points.length;
+      });
     }
 
     function moveTeacherInk(event) {
@@ -2380,31 +2419,27 @@
       if (teacherInkStartPoint && Math.hypot(lastPoint.x - teacherInkStartPoint.x, lastPoint.y - teacherInkStartPoint.y) > 0.035) {
         teacherInkMoved = true;
       }
-      if (teacherInkErasing) {
-        events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, canvas)); });
-        return;
-      }
-      if (!teacherInkActiveStroke) return;
-      if (teacherInkActiveStroke.tool === "shape" || teacherInkActiveStroke.tool === "highlighter") {
-        if (teacherInkActiveStroke.tool === "shape") {
-          teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], lastPoint];
-        } else {
-          events.forEach(function (item) {
-            teacherInkActiveStroke.points.push(canvasPoint(item, canvas));
-          });
-        }
-        renderTeacherInk();
-      } else {
-        events.forEach(function (item) {
-          teacherInkActiveStroke.points.push(canvasPoint(item, canvas));
-          drawLiveSegment(canvas, teacherInkActiveStroke);
-        });
-      }
-    }
+       if (teacherInkErasing) {
+         events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, canvas)); });
+         return;
+       }
+       if (!teacherInkActiveStroke) return;
+       appendCoalescedPoints(teacherInkActiveStroke, events, canvas);
+       if (teacherInkActiveStroke.tool === "shape" || teacherInkActiveStroke.tool === "highlighter") {
+         if (teacherInkActiveStroke.tool === "shape") {
+           teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], lastPoint];
+         }
+       }
+       scheduleTeacherInkPreview(canvas);
+     }
 
     function finishTeacherInk(event) {
       if (event && event.pointerId !== teacherInkActivePointerId) return;
       teacherInkActivePointerId = null;
+      if (teacherInkPreviewFrame !== null) {
+        cancelAnimationFrame(teacherInkPreviewFrame);
+        teacherInkPreviewFrame = null;
+      }
       const duration = performance.now() - teacherInkStartTime;
       const isTap = !teacherInkMoved && duration < 240;
       const pt = teacherInkStartPoint || (teacherInkActiveStroke && teacherInkActiveStroke.points[0]) || { x: 0, y: 0 };
@@ -2448,7 +2483,11 @@
       if (teacherInkActiveStroke && teacherInkActiveStroke.points && teacherInkActiveStroke.points.length > 1) {
         finishTeacherInk(event);
       } else {
-        teacherInkActivePointerId = null;
+         teacherInkActivePointerId = null;
+         if (teacherInkPreviewFrame !== null) {
+           cancelAnimationFrame(teacherInkPreviewFrame);
+           teacherInkPreviewFrame = null;
+         }
         teacherInkActiveStroke = null;
         teacherInkErasing = false;
         teacherInkChanged = false;
