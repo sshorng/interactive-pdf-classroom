@@ -7,6 +7,10 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23315f59'/%3E%3Cpath d='M28 24h32a12 12 0 0 1 12 12v40a8 8 0 0 1-8 8H32a12 12 0 0 1-12-12V32a8 8 0 0 1 8-8z' fill='%23fbf8f1'/%3E%3Cpath d='M36 38h28M36 50h24M36 62h16' stroke='%23315f59' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='68' cy='66' r='10' fill='%23c47f78'/%3E%3Cpath d='M65 66l2 2 4-4' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23315f59'/%3E%3Cpath d='M28 24h32a12 12 0 0 1 12 12v40a8 8 0 0 1-8 8H32a12 12 0 0 1-12-12V32a8 8 0 0 1 8-8z' fill='%23fbf8f1'/%3E%3Cpath d='M36 38h28M36 50h24M36 62h16' stroke='%23315f59' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='68' cy='66' r='10' fill='%23c47f78'/%3E%3Cpath d='M65 66l2 2 4-4' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <title>墨卷，互動講義批改</title>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+  <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+  <link rel="preconnect" href="https://quickchart.io" crossorigin>
+  <link rel="dns-prefetch" href="https://quickchart.io">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
     :root {
@@ -1624,20 +1628,30 @@
     async function loadBoardContext(boardId) {
       const cachedBoard = await localGet("boards", boardId);
       let result;
-      if (cachedBoard && await hasPendingBoardMutation(boardId)) {
+      if (cachedBoard) {
         result = { board: cachedBoard, areas: cachedBoard.areas || [] };
+        if (!state.demo && navigator.onLine) {
+          api("getBoard", { boardId: boardId }).then(async function (remote) {
+            if (remote && remote.board) {
+              const isNewer = !cachedBoard.updatedAt || String(remote.board.updatedAt) >= String(cachedBoard.updatedAt);
+              if (isNewer) {
+                await cacheBoardLocally(remote.board, remote.areas || []);
+                if (String(state.boardId) === String(boardId)) {
+                  state.board = remote.board;
+                  state.areas = Array.isArray(remote.areas) ? remote.areas : [];
+                  renderZones();
+                  renderReviewAreaList();
+                }
+              }
+            }
+          }).catch(function () {});
+        }
       } else {
         try {
           result = await api("getBoard", { boardId: boardId });
-          if (cachedBoard && cachedBoard.updatedAt && result.board.updatedAt && String(cachedBoard.updatedAt) > String(result.board.updatedAt)) {
-            result = { board: cachedBoard, areas: cachedBoard.areas || [] };
-          } else {
-            await cacheBoardLocally(result.board, result.areas || []);
-          }
+          await cacheBoardLocally(result.board, result.areas || []);
         } catch (error) {
-          if (!cachedBoard) throw error;
-          result = { board: cachedBoard, areas: cachedBoard.areas || [] };
-          setOfflineNote(true);
+          throw error;
         }
       }
       state.board = result.board;
@@ -1704,22 +1718,31 @@
     async function renderManagerView() {
       const main = document.getElementById("appMain");
       main.innerHTML = "<section class=\"dashboard-hero\"><div><p class=\"eyebrow\">PDF × CLASSROOM RESPONSE</p><h1>讓每一頁講義，<br>都能收到學生的回應。</h1><p class=\"lede\">建立不同課次的教材版面，圈出問答區，學生用照片或文字作答，教師在課堂中直接批改。</p><div class=\"page-actions\" style=\"justify-content:flex-start;margin-top:22px;\"><button class=\"button primary\" id=\"createBoardButton\" type=\"button\">＋ 建立教材版面</button><button class=\"button subtle\" id=\"openSettingsFromHero\" type=\"button\">連線設定</button></div></div><div class=\"hero-note\"><strong>一份教材，一個獨立空間</strong><p>每個版面都有自己的 PDF、問答區與學生作答，不會和其他課次混在一起。</p></div></section><div class=\"section-heading\"><div><h2>我的教材版面</h2><p>從這裡管理不同課次與批改進度。</p></div><span class=\"meta-chip\" id=\"boardCount\">載入中</span></div><div class=\"offline-note\">目前離線，已儲存的本機資料仍可操作；新的照片與批改會在恢復連線後補傳。</div><div class=\"board-grid\" id=\"boardGrid\"><div class=\"loading-wrap loading\">正在讀取教材版面</div></div>";
-       const managerLead = main.querySelector(".dashboard-hero .lede");
-       if (managerLead) managerLead.textContent = "建立不同課次的教材版面，放置問答圖釘；上課時用全螢幕 PDF 直接畫記，點圖釘查看學生作答。";
-       document.getElementById("createBoardButton").addEventListener("click", function () { openBoardForm(); });
+      const managerLead = main.querySelector(".dashboard-hero .lede");
+      if (managerLead) managerLead.textContent = "建立不同課次的教材版面，放置問答圖釘；上課時用全螢幕 PDF 直接畫記，點圖釘查看學生作答。";
+      document.getElementById("createBoardButton").addEventListener("click", function () { openBoardForm(); });
       document.getElementById("openSettingsFromHero").addEventListener("click", openSettingsModal);
-       try {
-         const result = await managerApi("listBoards", {});
-         for (const board of result.data || []) await cacheBoardLocally(board);
-         await pruneStaleLocalBoards(result.data || []);
-         state.boards = await mergePendingBoards(result.data || []);
-         renderBoardCards();
-         flushOutbox();
-       } catch (error) {
-         state.boards = (await localAll("boards")).filter(function (board) { return board.status !== "封存"; });
-         renderBoardCards();
-         setOfflineNote(true);
-       }
+
+      const localBoards = (await localAll("boards")).filter(function (board) { return board.status !== "封存"; });
+      if (localBoards.length) {
+        state.boards = localBoards;
+        renderBoardCards();
+      }
+
+      try {
+        const result = await managerApi("listBoards", {});
+        for (const board of result.data || []) await cacheBoardLocally(board);
+        await pruneStaleLocalBoards(result.data || []);
+        state.boards = await mergePendingBoards(result.data || []);
+        renderBoardCards();
+        flushOutbox();
+      } catch (error) {
+        if (!localBoards.length) {
+          state.boards = (await localAll("boards")).filter(function (board) { return board.status !== "封存"; });
+          renderBoardCards();
+        }
+        setOfflineNote(true);
+      }
       if (!GAS_URL && !state.demo) openSettingsModal();
     }
 
@@ -3957,7 +3980,7 @@
     async function init() {
       bindStaticEvents();
       setConnectionBadge();
-      await refreshSheetLink();
+      refreshSheetLink();
       await renderRoute();
       flushOutbox();
     }
