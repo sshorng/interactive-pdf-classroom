@@ -1449,8 +1449,12 @@
         const response = await fetch(GAS_URL, { method: "POST", body: form });
         const result = await response.json();
         if (!result.ok) throw new ApiError(result.error || "GAS 操作失敗。", false);
+        state.consecutiveNetworkErrors = 0;
+        setOfflineNote(false);
         return result;
       } catch (error) {
+        state.consecutiveNetworkErrors = (state.consecutiveNetworkErrors || 0) + 1;
+        if (state.consecutiveNetworkErrors >= 3 || !navigator.onLine) setOfflineNote(true);
         if (error instanceof ApiError) throw error;
         throw new ApiError(error.message || "網路連線失敗。", true);
       }
@@ -1463,8 +1467,12 @@
         const response = await fetch(GAS_URL + (GAS_URL.indexOf("?") > -1 ? "&" : "?") + query.toString());
         const result = await response.json();
         if (!result.ok) throw new ApiError(result.error || "GAS 操作失敗。", false);
+        state.consecutiveNetworkErrors = 0;
+        setOfflineNote(false);
         return result;
       } catch (error) {
+        state.consecutiveNetworkErrors = (state.consecutiveNetworkErrors || 0) + 1;
+        if (state.consecutiveNetworkErrors >= 3 || !navigator.onLine) setOfflineNote(true);
         if (error instanceof ApiError) throw error;
         throw new ApiError(error.message || "網路連線失敗。", true);
       }
@@ -2315,6 +2323,45 @@
       renderTeacherInk();
     }
 
+    function drawLiveSegment(canvas, stroke) {
+      if (!canvas || !stroke) return;
+      const context = canvas.getContext("2d");
+      const scale = window.devicePixelRatio || 1;
+      const width = Number(canvas.dataset.logicalWidth || canvas.clientWidth || canvas.width / scale);
+      const height = Number(canvas.dataset.logicalHeight || canvas.clientHeight || canvas.height / scale);
+      const pts = stroke.points;
+      const len = pts.length;
+      if (len < 2) return;
+      context.save();
+      context.scale(scale, scale);
+      const baseWidth = Math.max(1, Number(stroke.width || .005) * Math.min(width, height));
+      context.strokeStyle = stroke.color || "#d34f42";
+      context.fillStyle = stroke.color || "#d34f42";
+      context.lineWidth = stroke.tool === "highlighter" ? Math.max(16, baseWidth * 6) : baseWidth;
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      if (stroke.tool === "highlighter") context.globalAlpha = .35;
+      if (len >= 3) {
+        const p0 = { x: pts[len - 3].x * width, y: pts[len - 3].y * height };
+        const p1 = { x: pts[len - 2].x * width, y: pts[len - 2].y * height };
+        const p2 = { x: pts[len - 1].x * width, y: pts[len - 1].y * height };
+        const mid1 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+        const mid2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        context.beginPath();
+        context.moveTo(mid1.x, mid1.y);
+        context.quadraticCurveTo(p1.x, p1.y, mid2.x, mid2.y);
+        context.stroke();
+      } else if (len === 2) {
+        const p0 = { x: pts[0].x * width, y: pts[0].y * height };
+        const p1 = { x: pts[1].x * width, y: pts[1].y * height };
+        context.beginPath();
+        context.moveTo(p0.x, p0.y);
+        context.lineTo(p1.x, p1.y);
+        context.stroke();
+      }
+      context.restore();
+    }
+
     function moveTeacherInk(event) {
       if (event.pointerId !== teacherInkActivePointerId) return;
       if (!teacherInkActiveStroke && !teacherInkErasing) return;
@@ -2331,9 +2378,15 @@
         return;
       }
       if (!teacherInkActiveStroke) return;
-      if (teacherInkActiveStroke.tool === "shape") teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], lastPoint];
-      else events.forEach(function (item) { teacherInkActiveStroke.points.push(canvasPoint(item, canvas)); });
-      renderTeacherInk();
+      if (teacherInkActiveStroke.tool === "shape") {
+        teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], lastPoint];
+        renderTeacherInk();
+      } else {
+        events.forEach(function (item) {
+          teacherInkActiveStroke.points.push(canvasPoint(item, canvas));
+          drawLiveSegment(canvas, teacherInkActiveStroke);
+        });
+      }
     }
 
     function finishTeacherInk(event) {
@@ -2418,12 +2471,16 @@
       const height = Number.parseFloat(pdfCanvas.style.height) || pdfCanvas.clientHeight;
       if (!width || !height) return;
       const scale = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.floor(width * scale));
-      canvas.height = Math.max(1, Math.floor(height * scale));
-      canvas.style.width = width + "px";
-      canvas.style.height = height + "px";
-      canvas.dataset.logicalWidth = width;
-      canvas.dataset.logicalHeight = height;
+      const targetWidth = Math.max(1, Math.floor(width * scale));
+      const targetHeight = Math.max(1, Math.floor(height * scale));
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
+        canvas.dataset.logicalWidth = width;
+        canvas.dataset.logicalHeight = height;
+      }
       const teacherView = state.view === "editor" || state.view === "review" || state.view === "student";
       const strokes = teacherInkForPage(state.currentPage).slice();
       if (teacherInkActiveStroke) strokes.push(teacherInkActiveStroke);
@@ -2927,7 +2984,7 @@
       await renderPdfPage();
       await loadClassroomSync();
       await loadStudentSubmissions();
-      state.pollTimer = window.setInterval(function () { loadStudentSubmissions(); loadClassroomSync(); }, 3000);
+      state.pollTimer = window.setInterval(function () { loadStudentSubmissions(); loadClassroomSync(); }, 5000);
     }
 
     function bindStudentEvents() {
@@ -2967,12 +3024,14 @@
       if (!nickname || !state.boardId) return;
       try {
         const result = await api("listSubmissions", { boardId: state.boardId, nickname: nickname, role: "student" });
-         Promise.all((result.data || []).map(function (item) { return localPut("submissions", item); })).catch(function () {});
+        Promise.all((result.data || []).map(function (item) { return localPut("submissions", item); })).catch(function () {});
         const rows = await mergePendingSubmissions(result.data || [], state.boardId, nickname);
         state.studentSubmissions = new Map(rows.map(function (item) { return [item.areaId, item]; }));
         renderStudentAreaList();
         renderZones();
         if (state.activeAreaId) renderStudentAnswerPanel();
+        state.consecutiveNetworkErrors = 0;
+        setOfflineNote(false);
       } catch (error) {
         if (error.network) {
           const localResult = await localRequest("listSubmissions", { boardId: state.boardId, nickname: nickname, role: "student" });
@@ -2981,7 +3040,8 @@
           renderStudentAreaList();
           renderZones();
           if (state.activeAreaId) renderStudentAnswerPanel();
-          setOfflineNote(true);
+          state.consecutiveNetworkErrors = (state.consecutiveNetworkErrors || 0) + 1;
+          if (state.consecutiveNetworkErrors >= 3 || !navigator.onLine) setOfflineNote(true);
         }
       }
     }
@@ -3100,12 +3160,16 @@
       const width = image.clientWidth || rect.width || parentRect.width;
       const height = image.clientHeight || rect.height || parentRect.height;
       const scale = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.floor(width * scale));
-      canvas.height = Math.max(1, Math.floor(height * scale));
-      canvas.style.width = width + "px";
-      canvas.style.height = height + "px";
-      canvas.dataset.logicalWidth = width;
-      canvas.dataset.logicalHeight = height;
+      const targetWidth = Math.max(1, Math.floor(width * scale));
+      const targetHeight = Math.max(1, Math.floor(height * scale));
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
+        canvas.dataset.logicalWidth = width;
+        canvas.dataset.logicalHeight = height;
+      }
     }
 
     function drawNormalizedStrokes(canvas, strokes) {
@@ -3482,7 +3546,7 @@
        document.getElementById("reviewBackButton").addEventListener("click", function () { goView("manager"); });
        ["exportJsonButton", "exportCsvButton"].forEach(function (id) { const button = document.getElementById(id); if (button) button.remove(); });
        await loadReviewSubmissions();
-       state.pollTimer = window.setInterval(function () { loadReviewSubmissions(); }, 3000);
+       state.pollTimer = window.setInterval(function () { loadReviewSubmissions(); }, 5000);
      }
 
     async function loadLocalReviewSubmissions() {
@@ -3506,6 +3570,8 @@
         renderReviewAreaList();
         renderSubmissionList();
         renderZones();
+        state.consecutiveNetworkErrors = 0;
+        setOfflineNote(false);
         Promise.all(remoteRows.map(function (item) { return localPut("submissions", item); })).catch(function () {});
       } catch (error) {
         state.reviewLoading = false;
@@ -3513,7 +3579,8 @@
         renderReviewAreaList();
         renderSubmissionList();
         renderZones();
-        setOfflineNote(true);
+        state.consecutiveNetworkErrors = (state.consecutiveNetworkErrors || 0) + 1;
+        if (state.consecutiveNetworkErrors >= 3 || !navigator.onLine) setOfflineNote(true);
       }
     }
 
@@ -3882,9 +3949,15 @@
           events.forEach(function (item) { eraseReviewStrokeAt(canvasPoint(item, canvas)); });
           return;
         }
-        if (reviewActiveStroke.tool === "shape") reviewActiveStroke.points = [reviewActiveStroke.points[0], lastPoint];
-        else events.forEach(function (item) { reviewActiveStroke.points.push(canvasPoint(item, canvas)); });
-        drawReviewCanvas();
+        if (reviewActiveStroke.tool === "shape") {
+          reviewActiveStroke.points = [reviewActiveStroke.points[0], lastPoint];
+          drawReviewCanvas();
+        } else {
+          events.forEach(function (item) {
+            reviewActiveStroke.points.push(canvasPoint(item, canvas));
+            drawLiveSegment(canvas, reviewActiveStroke);
+          });
+        }
       });
       canvas.addEventListener("pointerup", finishReviewStroke);
       canvas.addEventListener("pointercancel", cancelReviewStroke);
