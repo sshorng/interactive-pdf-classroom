@@ -590,6 +590,7 @@
       teacherInkVersion: "",
       drawingInk: false,
       inkTool: "pen",
+      previousInkTool: "pen",
       inkShape: "arrow",
       inkColor: "#c47f78",
       inkWidth: 4,
@@ -605,6 +606,7 @@
       reviewColor: "#d34f42",
       reviewWidth: 4,
       reviewTool: "pen",
+      previousReviewTool: "pen",
       reviewShape: "arrow",
       adminToken: localStorage.getItem(APP_KEY + "admin_token") || "",
       pollTimer: null,
@@ -923,6 +925,21 @@
       document.addEventListener("gesturestart", function (event) { event.preventDefault(); });
       document.addEventListener("gesturechange", function (event) { event.preventDefault(); });
       document.addEventListener("gestureend", function (event) { event.preventDefault(); });
+      window.addEventListener("applepencildoubletap", function (event) {
+        event.preventDefault();
+        togglePencilEraser();
+      });
+      document.addEventListener("applepencildoubletap", function (event) {
+        event.preventDefault();
+        togglePencilEraser();
+      });
+      window.addEventListener("keydown", function (event) {
+        if (event.target && event.target.matches("input, textarea, select")) return;
+        if (event.key === "e" || event.key === "E") {
+          event.preventDefault();
+          togglePencilEraser();
+        }
+      });
       bindPullToRefresh();
     }
 
@@ -2122,10 +2139,43 @@
       for (const page of pages) await persistTeacherInk(page);
     }
 
+    function togglePencilEraser() {
+      if (document.getElementById("reviewCanvas") && state.reviewSubmission) {
+        if (state.reviewTool !== "eraser") {
+          state.previousReviewTool = state.reviewTool || "pen";
+          state.reviewTool = "eraser";
+          showToast("已切換為橡皮擦。", "info");
+        } else {
+          state.reviewTool = state.previousReviewTool || "pen";
+          const label = state.reviewTool === "highlighter" ? "螢光筆" : (state.reviewTool === "shape" ? "圖形" : "手寫筆");
+          showToast("已切換回" + label + "。", "info");
+        }
+        updateReviewInkControls();
+        return;
+      }
+      if (state.view === "review" || state.view === "editor") {
+        if (!state.drawingInk) setTeacherInkMode(true);
+        if (state.inkTool !== "eraser") {
+          state.previousInkTool = state.inkTool || "pen";
+          state.inkTool = "eraser";
+          setInkStatus("Apple Pencil 切換為橡皮擦");
+          showToast("已切換為橡皮擦。", "info");
+        } else {
+          state.inkTool = state.previousInkTool || "pen";
+          const label = state.inkTool === "highlighter" ? "螢光筆" : (state.inkTool === "shape" ? "圖形" : "手寫筆");
+          setInkStatus("Apple Pencil 切換回" + label);
+          showToast("已切換回" + label + "。", "info");
+        }
+        updateInkControls();
+      }
+    }
+
     let teacherInkActivePointerId = null;
     let teacherInkActiveStroke = null;
     let teacherInkErasing = false;
     let teacherInkChanged = false;
+    let lastTeacherPenTapTime = 0;
+    let lastTeacherPenTapPoint = null;
 
     function bindTeacherInkCanvas() {
       const canvas = document.getElementById("inkCanvas");
@@ -2158,6 +2208,18 @@
         try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
       }
       const point = canvasPoint(event, canvas);
+      if (isPen) {
+        const now = performance.now();
+        if (lastTeacherPenTapPoint && (now - lastTeacherPenTapTime < 350) && Math.hypot(point.x - lastTeacherPenTapPoint.x, point.y - lastTeacherPenTapPoint.y) < 0.035) {
+          lastTeacherPenTapTime = 0;
+          lastTeacherPenTapPoint = null;
+          teacherInkActivePointerId = null;
+          togglePencilEraser();
+          return;
+        }
+        lastTeacherPenTapTime = now;
+        lastTeacherPenTapPoint = point;
+      }
       teacherInkChanged = false;
       if (state.inkTool === "eraser") {
         teacherInkErasing = true;
@@ -3458,12 +3520,15 @@
     let reviewActiveStroke = null;
     let reviewErasing = false;
     let reviewInkChanged = false;
+    let lastReviewPenTapTime = 0;
+    let lastReviewPenTapPoint = null;
 
     function bindReviewCanvas(canvas) {
       if (!canvas || canvas.dataset.bound === "1") return;
       canvas.dataset.bound = "1";
       canvas.addEventListener("pointerdown", function (event) {
         if (reviewActivePointerId !== null) return;
+        const isPen = event.pointerType === "pen";
         if (event.pointerType === "touch") {
           if (event.isPrimary === false) return;
           if (event.width > 28 || event.height > 28) return;
@@ -3474,6 +3539,18 @@
           try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
         }
         const point = canvasPoint(event, canvas);
+        if (isPen) {
+          const now = performance.now();
+          if (lastReviewPenTapPoint && (now - lastReviewPenTapTime < 350) && Math.hypot(point.x - lastReviewPenTapPoint.x, point.y - lastReviewPenTapPoint.y) < 0.035) {
+            lastReviewPenTapTime = 0;
+            lastReviewPenTapPoint = null;
+            reviewActivePointerId = null;
+            togglePencilEraser();
+            return;
+          }
+          lastReviewPenTapTime = now;
+          lastReviewPenTapPoint = point;
+        }
         reviewInkChanged = false;
         if (state.reviewTool === "eraser") {
           reviewErasing = true;
