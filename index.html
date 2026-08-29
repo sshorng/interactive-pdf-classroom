@@ -397,13 +397,10 @@
     body.editor-mode .pdf-main { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; position: relative; }
     body.editor-mode .pdf-scroll { flex: 1; min-height: 0; height: auto; overflow: auto; padding-bottom: 76px; }
     body.editor-mode .workspace-sidebar { height: 100%; max-height: none; overflow-x: hidden; overflow-y: auto; }
-    body.classroom-mode .classroom-pdf-panel { min-height: 0; height: 100%; }
-    body.classroom-mode .classroom-pdf-panel .pdf-toolbar { position: absolute; top: 0; right: 0; left: 0; z-index: 10; max-height: 116px; overflow: auto; padding: 6px 10px; background: rgba(239, 237, 230, .94); backdrop-filter: blur(14px); }
-    body.classroom-mode .classroom-pdf-panel .pdf-scroll { height: 100%; min-height: 0; padding: 78px 28px 28px; }
-    body.classroom-mode .classroom-pdf-panel .pdf-scroll { padding-bottom: 76px; }
-    body.classroom-mode .classroom-pdf-panel .pdf-toolbar { justify-content: flex-start; align-items: center; gap: 8px; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; }
-    body.classroom-mode .classroom-pdf-panel .pdf-toolbar .toolbar-group { flex-wrap: nowrap; }
-    body.classroom-mode .classroom-pdf-panel .ink-controls { overflow: visible; }
+    body.classroom-mode .classroom-layout { height: 100vh; max-height: 100vh; min-height: 0; grid-template-columns: 1fr; border-radius: 0; border: none; }
+    body.classroom-mode .classroom-pdf-panel { min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+    body.classroom-mode .classroom-pdf-panel .pdf-toolbar { position: absolute; top: 0; right: 0; left: 0; z-index: 10; max-height: 116px; overflow-x: auto; overflow-y: hidden; padding: 6px 10px; background: rgba(239, 237, 230, .94); backdrop-filter: blur(14px); justify-content: flex-start; align-items: center; gap: 8px; flex-wrap: nowrap; white-space: nowrap; }
+    body.classroom-mode .classroom-pdf-panel .pdf-scroll { flex: 1; height: 100%; min-height: 0; overflow-y: auto; overflow-x: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; padding: 78px 28px 76px; }
     body.classroom-mode .classroom-sidebar { display: none; }
     body.classroom-mode .ink-controls { gap: 4px; }
     body.classroom-mode .ink-controls select { min-height: 36px; }
@@ -1047,9 +1044,10 @@
 
       window.addEventListener("touchstart", function (event) {
         if (isRefreshing || state.drawingInk || event.touches.length !== 1) return;
+        if (state.view !== "manager") return;
         const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
         const target = event.target;
-        if (target && target.closest && target.closest(".modal-card, .review-panel, textarea, input, select")) return;
+        if (target && target.closest && target.closest(".modal-card, .review-panel, textarea, input, select, .pdf-scroll, .classroom-pdf-panel, .student-workspace")) return;
         if (scrollY <= 5) {
           startY = event.touches[0].clientY;
           isPulling = true;
