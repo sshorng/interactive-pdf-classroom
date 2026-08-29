@@ -314,11 +314,14 @@
     .classroom-sidebar .area-list { margin-bottom: 20px; }
     .classroom-tip { padding: 13px; color: var(--muted); background: #f7f5ef; border-radius: 12px; font-size: 12px; }
     .classroom-modal-layout { display: block; }
-    .review-navigator { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; padding: 3px 5px; background: #f5f3ec; border: 1px solid var(--line); border-radius: 10px; }
-    .review-navigator .toolbar-button { width: 32px; min-width: 32px; min-height: 32px; padding: 2px; font-size: 17px; }
+    .review-navigator { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 6px 10px; background: #f5f3ec; border: 1px solid var(--line); border-radius: 12px; }
+    .review-navigator .toolbar-button { width: 44px; min-width: 44px; min-height: 44px; padding: 0; font-size: 24px; font-weight: 700; border-radius: 10px; cursor: pointer; color: var(--teal-dark); background: #fff; border: 1px solid #d5d5cb; transition: background .12s, transform .08s; }
+    .review-navigator .toolbar-button:active:not(:disabled) { transform: scale(.93); }
+    .review-navigator .toolbar-button:hover:not(:disabled) { background: var(--teal-soft); border-color: var(--teal); }
+    .review-navigator .toolbar-button:disabled { opacity: .3; cursor: not-allowed; }
     .review-navigator-label { display: none; }
-    .review-navigator select { min-width: 0; flex: 1; min-height: 32px; padding: 4px 8px; color: var(--ink); background: #fffdf8; border: 1px solid #d8d8cf; border-radius: 8px; font-size: 13px; }
-    .review-navigator-position { flex: 0 0 auto; min-width: 31px; color: var(--muted); font-size: 10px; text-align: center; }
+    .review-navigator select { min-width: 0; flex: 1; min-height: 44px; padding: 6px 12px; color: var(--ink); background: #fffdf8; border: 1px solid #d8d8cf; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; }
+    .review-navigator-position { flex: 0 0 auto; min-width: 48px; color: var(--teal-dark); font-size: 13px; font-weight: 800; text-align: center; }
     .classroom-modal-layout .review-panel { min-height: 540px; padding: 13px; border: 1px solid var(--line); border-radius: 13px; }
     .classroom-modal-layout .review-toolbar { gap: 5px; margin-bottom: 8px; padding: 5px 7px; }
     .classroom-modal-layout .review-toolbar label { gap: 4px; font-size: 11px; }
@@ -937,6 +940,17 @@
         if (event.key === "e" || event.key === "E") {
           event.preventDefault();
           togglePencilEraser();
+          return;
+        }
+        const overlay = document.getElementById("modalOverlay");
+        if (overlay && overlay.classList.contains("show") && state.activeAreaId && state.reviewSubmission) {
+          if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+            event.preventDefault();
+            moveReviewSubmission(-1);
+          } else if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+            event.preventDefault();
+            moveReviewSubmission(1);
+          }
         }
       });
       bindPullToRefresh();
@@ -3225,6 +3239,37 @@
       document.getElementById("reviewPreviousButton").addEventListener("click", function () { moveReviewSubmission(-1); });
       document.getElementById("reviewNextButton").addEventListener("click", function () { moveReviewSubmission(1); });
       document.getElementById("reviewSubmissionSelect").addEventListener("change", function (event) { if (event.target.value) selectReviewSubmission(event.target.value); });
+      bindReviewModalSwipe(content.querySelector(".classroom-modal-layout"));
+    }
+
+    function bindReviewModalSwipe(element) {
+      if (!element || element.dataset.swipeBound === "1") return;
+      element.dataset.swipeBound = "1";
+      let startX = 0;
+      let startY = 0;
+      let isSwiping = false;
+
+      element.addEventListener("touchstart", function (event) {
+        if (event.touches.length !== 1) return;
+        const target = event.target;
+        if (target && (target.id === "reviewCanvas" || target.closest("textarea, input, select, button"))) return;
+        startX = event.touches[0].clientX;
+        startY = event.touches[0].clientY;
+        isSwiping = true;
+      }, { passive: true });
+
+      element.addEventListener("touchend", function (event) {
+        if (!isSwiping) return;
+        isSwiping = false;
+        const touch = event.changedTouches[0];
+        if (!touch) return;
+        const diffX = touch.clientX - startX;
+        const diffY = touch.clientY - startY;
+        if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY) * 1.4) {
+          if (diffX < 0) moveReviewSubmission(1);
+          else moveReviewSubmission(-1);
+        }
+      }, { passive: true });
     }
 
     async function openClassroomAnswerModal(area) {
@@ -3416,9 +3461,24 @@
       state.reviewPhotoIndex = 0;
       state.reviewStrokes = [];
       state.reviewComment = "";
-      renderReviewAreaList();
       renderSubmissionList();
       await renderReviewPanel();
+      preloadNeighborReviewImages();
+    }
+
+    function preloadNeighborReviewImages() {
+      const rows = reviewRowsForActiveArea();
+      if (!rows.length || !state.reviewSubmission) return;
+      const currentIndex = rows.findIndex(function (item) { return String(item.id) === String(state.reviewSubmission.id); });
+      if (currentIndex < 0) return;
+      [currentIndex - 1, currentIndex + 1].forEach(function (idx) {
+        if (idx >= 0 && idx < rows.length) {
+          const neighbor = rows[idx];
+          (neighbor.imageFileIds || []).forEach(function (fileId) {
+            fetchFileData(fileId, state.boardId).catch(function () {});
+          });
+        }
+      });
     }
 
     async function renderReviewPanel() {
@@ -3492,10 +3552,9 @@
         stage.innerHTML = "<div class=\"inline-message\">這筆作答沒有照片，請使用文字答案與教師評語批改。</div>";
         return;
       }
-      state.reviewImages = [];
-      for (const id of ids) {
-        try { state.reviewImages.push(await fetchFileData(id, state.boardId)); } catch (error) { state.reviewImages.push(""); }
-      }
+      state.reviewImages = await Promise.all(ids.map(async function (id) {
+        try { return await fetchFileData(id, state.boardId); } catch (error) { return ""; }
+      }));
       tabs.innerHTML = state.reviewImages.map(function (_, index) { return "<button class=\"photo-tab " + (index === state.reviewPhotoIndex ? "active" : "") + "\" data-photo-index=\"" + index + "\" type=\"button\">照片 " + (index + 1) + "</button>"; }).join("");
       tabs.querySelectorAll("[data-photo-index]").forEach(function (button) { button.addEventListener("click", function () { state.reviewPhotoIndex = Number(button.dataset.photoIndex); const feedback = normalizeFeedback(state.reviewSubmission.teacherStrokes); state.reviewStrokes = state.reviewPhotoIndex === feedback.photoIndex ? JSON.parse(JSON.stringify(feedback.strokes || [])) : []; loadReviewImages(); }); });
       const dataUrl = state.reviewImages[state.reviewPhotoIndex];
