@@ -2,8 +2,10 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#315f59">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23315f59'/%3E%3Cpath d='M28 24h32a12 12 0 0 1 12 12v40a8 8 0 0 1-8 8H32a12 12 0 0 1-12-12V32a8 8 0 0 1 8-8z' fill='%23fbf8f1'/%3E%3Cpath d='M36 38h28M36 50h24M36 62h16' stroke='%23315f59' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='68' cy='66' r='10' fill='%23c47f78'/%3E%3Cpath d='M65 66l2 2 4-4' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23315f59'/%3E%3Cpath d='M28 24h32a12 12 0 0 1 12 12v40a8 8 0 0 1-8 8H32a12 12 0 0 1-12-12V32a8 8 0 0 1 8-8z' fill='%23fbf8f1'/%3E%3Cpath d='M36 38h28M36 50h24M36 62h16' stroke='%23315f59' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='68' cy='66' r='10' fill='%23c47f78'/%3E%3Cpath d='M65 66l2 2 4-4' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <title>墨卷，互動講義批改</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
@@ -911,6 +913,9 @@
         showToast("目前離線，資料會先保留在本機。", "warning");
       });
       window.addEventListener("popstate", renderRoute);
+      document.addEventListener("gesturestart", function (event) { event.preventDefault(); });
+      document.addEventListener("gesturechange", function (event) { event.preventDefault(); });
+      document.addEventListener("gestureend", function (event) { event.preventDefault(); });
     }
 
     async function refreshSheetLink() {
@@ -1712,22 +1717,107 @@
     function bindPdfSwipe(scroll) {
       if (!scroll || scroll.dataset.swipeBound === "1") return;
       scroll.dataset.swipeBound = "1";
-      let start = null;
+      let startTouch = null;
+      let initialPinchDistance = 0;
+      let initialZoom = 1;
+      let isPinching = false;
+      let lastPinchScale = 1;
+
+      function getPinchDist(e) {
+        if (!e.touches || e.touches.length < 2) return 0;
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        return Math.hypot(dx, dy);
+      }
+
       scroll.addEventListener("touchstart", function (event) {
-        if (state.drawingInk || !event.changedTouches.length) return;
-        const touch = event.changedTouches[0];
-        start = { x: touch.clientX, y: touch.clientY };
-      }, { passive: true });
+        if (state.drawingInk) return;
+        if (event.touches.length === 2) {
+          isPinching = true;
+          startTouch = null;
+          initialPinchDistance = getPinchDist(event);
+          initialZoom = state.zoom || 1;
+          lastPinchScale = 1;
+          const stage = scroll.querySelector(".page-stage");
+          if (stage) {
+            stage.style.transformOrigin = "center top";
+            stage.style.transition = "none";
+          }
+        } else if (event.touches.length === 1 && !isPinching) {
+          const touch = event.touches[0];
+          startTouch = { x: touch.clientX, y: touch.clientY, time: performance.now() };
+        }
+      }, { passive: false });
+
+      scroll.addEventListener("touchmove", function (event) {
+        if (state.drawingInk) return;
+        if (event.touches.length === 2 && isPinching && initialPinchDistance > 0) {
+          event.preventDefault();
+          const currDist = getPinchDist(event);
+          if (currDist > 0) {
+            lastPinchScale = currDist / initialPinchDistance;
+            const stage = scroll.querySelector(".page-stage");
+            if (stage) {
+              stage.style.transform = "scale(" + lastPinchScale + ")";
+            }
+          }
+        }
+      }, { passive: false });
+
       scroll.addEventListener("touchend", function (event) {
-        if (!start || state.drawingInk || !event.changedTouches.length) { start = null; return; }
+        if (isPinching) {
+          if (event.touches.length < 2) {
+            isPinching = false;
+            const stage = scroll.querySelector(".page-stage");
+            if (stage) {
+              stage.style.transform = "";
+              stage.style.transition = "";
+            }
+            if (lastPinchScale && Math.abs(lastPinchScale - 1) > 0.04) {
+              const newZoom = clamp(initialZoom * lastPinchScale, 0.5, 3.0);
+              setZoom(newZoom);
+            }
+            initialPinchDistance = 0;
+            lastPinchScale = 1;
+          }
+          return;
+        }
+        if (!startTouch || state.drawingInk || !event.changedTouches.length) {
+          startTouch = null;
+          return;
+        }
         const touch = event.changedTouches[0];
-        const dx = touch.clientX - start.x;
-        const dy = touch.clientY - start.y;
-        start = null;
-        if (Math.abs(dx) < 65 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
-        changePage(dx < 0 ? 1 : -1);
+        const dx = touch.clientX - startTouch.x;
+        const dy = touch.clientY - startTouch.y;
+        const dt = performance.now() - startTouch.time;
+        startTouch = null;
+        if (dt < 400 && Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+          changePage(dx < 0 ? 1 : -1);
+        }
+      }, { passive: false });
+
+      scroll.addEventListener("touchcancel", function () {
+        if (isPinching) {
+          isPinching = false;
+          const stage = scroll.querySelector(".page-stage");
+          if (stage) {
+            stage.style.transform = "";
+            stage.style.transition = "";
+          }
+        }
+        startTouch = null;
+        initialPinchDistance = 0;
+        lastPinchScale = 1;
       }, { passive: true });
-      scroll.addEventListener("touchcancel", function () { start = null; }, { passive: true });
+
+      scroll.addEventListener("wheel", function (event) {
+        if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          const delta = -event.deltaY;
+          const factor = delta > 0 ? 1.08 : 0.92;
+          setZoom(clamp(state.zoom * factor, 0.5, 3.0));
+        }
+      }, { passive: false });
     }
 
     function bindInkControls() {
@@ -2503,7 +2593,7 @@
     }
 
     function setZoom(value) {
-      state.zoom = clamp(Math.round(value * 10) / 10, .6, 2.2);
+      state.zoom = clamp(Math.round(value * 100) / 100, .5, 3.0);
       renderPdfPage();
       scheduleClassroomStateSave();
     }
