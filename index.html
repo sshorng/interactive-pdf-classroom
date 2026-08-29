@@ -270,9 +270,9 @@
     .student-identity input::placeholder { color: #c5ddd3; }
     .student-identity input:focus { border-color: #fff; }
     .student-workspace { min-height: 680px; }
-    .student-workspace .workspace-sidebar { display: flex; flex-direction: column; }
-    .answer-panel { display: flex; flex: 1; flex-direction: column; min-height: 470px; }
-    .answer-panel-empty { display: grid; flex: 1; place-items: center; min-height: 420px; padding: 22px; color: var(--muted); background: #f7f5ef; border-radius: 15px; text-align: center; }
+    .student-workspace .workspace-sidebar { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .answer-panel { display: flex; flex: 1 0 auto; flex-direction: column; min-height: 0; }
+    .answer-panel-empty { display: grid; flex: 1; place-items: center; min-height: 220px; padding: 22px; color: var(--muted); background: #f7f5ef; border-radius: 15px; text-align: center; }
     .answer-panel-empty strong { display: block; margin-bottom: 6px; color: var(--teal-dark); font-size: 18px; }
     .answer-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 15px; }
     .answer-panel-head h3 { margin-bottom: 3px; }
@@ -290,7 +290,7 @@
     .feedback-preview { position: relative; overflow: hidden; margin-top: 10px; background: #fff; border-radius: 9px; }
     .feedback-preview img { display: block; width: 100%; height: auto; }
     .feedback-preview canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-    .answer-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 15px; }
+    .answer-actions { display: flex; gap: 8px; margin-top: 16px; padding: 12px 0 6px; position: sticky; bottom: 0; background: #fffdf8; border-top: 1px solid rgba(216,216,207,.6); z-index: 5; }
     .answer-actions .button { flex: 1; }
 
     .review-shell { display: grid; gap: 15px; }
@@ -454,9 +454,8 @@
       .classroom-sidebar { max-height: none; border-top: 1px solid var(--line); border-left: 0; }
       body.student-mode .student-banner { align-items: stretch; flex-direction: row; }
       body.student-mode .student-identity { min-width: 175px; }
-      body.student-mode .student-workspace .workspace-sidebar { max-height: 34vh; }
-      body.student-mode .student-workspace .pdf-workspace { grid-template-rows: minmax(0, 1fr) minmax(220px, 34vh); }
-      body.student-mode .student-workspace .workspace-sidebar { height: auto; max-height: none; }
+      body.student-mode .student-workspace .pdf-workspace { grid-template-rows: minmax(0, 1fr) minmax(260px, 45vh); }
+      body.student-mode .student-workspace .workspace-sidebar { height: 100%; min-height: 0; max-height: none; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; }
       .submission-list { max-height: 300px; border-right: 0; border-bottom: 1px solid var(--line); }
       .submission-items { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
     }
@@ -2947,6 +2946,10 @@
       const container = document.getElementById("newPhotoPreview");
       if (!container) return;
       container.innerHTML = state.pendingStudentImages.map(function (image) { return "<div class=\"photo-thumb\"><img src=\"" + image.data + "\" alt=\"待上傳答案照片\"></div>"; }).join("");
+      const sidebar = document.querySelector(".student-workspace .workspace-sidebar");
+      if (sidebar && state.pendingStudentImages.length) {
+        window.setTimeout(function () { sidebar.scrollTop = sidebar.scrollHeight; }, 60);
+      }
     }
 
     function renderExistingPhotoPreview() {
