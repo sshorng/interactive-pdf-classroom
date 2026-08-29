@@ -2266,6 +2266,10 @@
     let teacherInkActiveStroke = null;
     let teacherInkErasing = false;
     let teacherInkChanged = false;
+    let teacherInkStartTime = 0;
+    let teacherInkStartPoint = null;
+    let teacherInkMoved = false;
+    let lastTeacherTipTap = null;
 
     function bindTeacherInkCanvas() {
       const canvas = document.getElementById("inkCanvas");
@@ -2298,6 +2302,9 @@
         try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
       }
       const point = canvasPoint(event, canvas);
+      teacherInkStartTime = performance.now();
+      teacherInkStartPoint = point;
+      teacherInkMoved = false;
       teacherInkChanged = false;
       if (state.inkTool === "eraser") {
         teacherInkErasing = true;
@@ -2315,12 +2322,16 @@
       const canvas = document.getElementById("inkCanvas") || event.currentTarget;
       const events = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
       if (!events.length) return;
+      const lastPoint = canvasPoint(events[events.length - 1], canvas);
+      if (teacherInkStartPoint && Math.hypot(lastPoint.x - teacherInkStartPoint.x, lastPoint.y - teacherInkStartPoint.y) > 0.008) {
+        teacherInkMoved = true;
+      }
       if (teacherInkErasing) {
         events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, canvas)); });
         return;
       }
       if (!teacherInkActiveStroke) return;
-      if (teacherInkActiveStroke.tool === "shape") teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], canvasPoint(events[events.length - 1], canvas)];
+      if (teacherInkActiveStroke.tool === "shape") teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], lastPoint];
       else events.forEach(function (item) { teacherInkActiveStroke.points.push(canvasPoint(item, canvas)); });
       renderTeacherInk();
     }
@@ -2335,6 +2346,26 @@
         return;
       }
       if (!teacherInkActiveStroke) return;
+      const duration = performance.now() - teacherInkStartTime;
+      const isTap = !teacherInkMoved && duration < 240;
+      const pt = teacherInkStartPoint || teacherInkActiveStroke.points[0];
+      const now = performance.now();
+      if (isTap && (event && (event.pointerType === "pen" || event.pointerType === "touch"))) {
+        if (lastTeacherTipTap && (now - lastTeacherTipTap.time < 380) && Math.hypot(pt.x - lastTeacherTipTap.x, pt.y - lastTeacherTipTap.y) < 0.04) {
+          lastTeacherTipTap = null;
+          teacherInkActiveStroke = null;
+          const strokes = teacherInkForPage(state.currentPage).slice();
+          if (strokes.length > 0 && strokes[strokes.length - 1].points.length <= 2) strokes.pop();
+          state.teacherInk.set(Number(state.currentPage), strokes);
+          renderTeacherInk();
+          scheduleTeacherInkSave();
+          togglePencilEraser();
+          return;
+        }
+        lastTeacherTipTap = { x: pt.x, y: pt.y, time: now };
+      } else {
+        lastTeacherTipTap = null;
+      }
       const strokes = teacherInkForPage(state.currentPage).slice();
       strokes.push(teacherInkActiveStroke);
       state.teacherInk.set(Number(state.currentPage), strokes);
@@ -3804,6 +3835,10 @@
     let reviewErasing = false;
     let reviewInkChanged = false;
     let isReviewPinching = false;
+    let reviewStartTime = 0;
+    let reviewStartPoint = null;
+    let reviewMoved = false;
+    let lastReviewTipTap = null;
 
     function bindReviewCanvas(canvas) {
       if (!canvas || canvas.dataset.bound === "1") return;
@@ -3821,6 +3856,9 @@
           try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
         }
         const point = canvasPoint(event, canvas);
+        reviewStartTime = performance.now();
+        reviewStartPoint = point;
+        reviewMoved = false;
         reviewInkChanged = false;
         if (state.reviewTool === "eraser") {
           reviewErasing = true;
@@ -3836,11 +3874,15 @@
         event.preventDefault();
         const events = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
         if (!events.length) return;
+        const lastPoint = canvasPoint(events[events.length - 1], canvas);
+        if (reviewStartPoint && Math.hypot(lastPoint.x - reviewStartPoint.x, lastPoint.y - reviewStartPoint.y) > 0.008) {
+          reviewMoved = true;
+        }
         if (reviewErasing) {
           events.forEach(function (item) { eraseReviewStrokeAt(canvasPoint(item, canvas)); });
           return;
         }
-        if (reviewActiveStroke.tool === "shape") reviewActiveStroke.points = [reviewActiveStroke.points[0], canvasPoint(events[events.length - 1], canvas)];
+        if (reviewActiveStroke.tool === "shape") reviewActiveStroke.points = [reviewActiveStroke.points[0], lastPoint];
         else events.forEach(function (item) { reviewActiveStroke.points.push(canvasPoint(item, canvas)); });
         drawReviewCanvas();
       });
@@ -3857,6 +3899,25 @@
         return;
       }
       if (!reviewActiveStroke) return;
+      const duration = performance.now() - reviewStartTime;
+      const isTap = !reviewMoved && duration < 240;
+      const pt = reviewStartPoint || reviewActiveStroke.points[0];
+      const now = performance.now();
+      if (isTap && (event && (event.pointerType === "pen" || event.pointerType === "touch"))) {
+        if (lastReviewTipTap && (now - lastReviewTipTap.time < 380) && Math.hypot(pt.x - lastReviewTipTap.x, pt.y - lastReviewTipTap.y) < 0.04) {
+          lastReviewTipTap = null;
+          reviewActiveStroke = null;
+          if (state.reviewStrokes.length > 0 && state.reviewStrokes[state.reviewStrokes.length - 1].points.length <= 2) {
+            state.reviewStrokes.pop();
+          }
+          drawReviewCanvas();
+          togglePencilEraser();
+          return;
+        }
+        lastReviewTipTap = { x: pt.x, y: pt.y, time: now };
+      } else {
+        lastReviewTipTap = null;
+      }
       state.reviewStrokes.push(reviewActiveStroke);
       reviewActiveStroke = null;
       drawReviewCanvas();
