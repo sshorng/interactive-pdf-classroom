@@ -1915,10 +1915,9 @@
      }
 
      function toggleTeacherInkFromGesture(event) {
-       if (state.view !== "review" || !state.board || !state.pdf || isInkGestureExcludedTarget(event.target)) return false;
-       event.preventDefault();
+       if ((state.view !== "review" && state.view !== "editor") || !state.board || !state.pdf || isInkGestureExcludedTarget(event.target)) return false;
+       if (event && typeof event.preventDefault === "function") event.preventDefault();
        setTeacherInkMode(!state.drawingInk);
-       setInkStatus(state.drawingInk ? "手寫模式已開啟" : "手寫模式已關閉");
        return true;
      }
 
@@ -1936,7 +1935,7 @@
          if (isInkGestureExcludedTarget(event.target)) { lastTouchTap = null; return; }
          const now = performance.now();
          const point = { x: event.clientX, y: event.clientY };
-         if (lastTouchTap && now - lastTouchTap.time <= 320 && Math.hypot(point.x - lastTouchTap.x, point.y - lastTouchTap.y) <= 32) {
+         if (lastTouchTap && now - lastTouchTap.time <= 350 && Math.hypot(point.x - lastTouchTap.x, point.y - lastTouchTap.y) <= 40) {
            lastTouchTap = null;
            ignoreNativeDblClickUntil = now + 500;
            toggleTeacherInkFromGesture(event);
@@ -2408,7 +2407,7 @@
       const isTap = !teacherInkMoved && duration < 240;
       const pt = teacherInkStartPoint || (teacherInkActiveStroke && teacherInkActiveStroke.points[0]) || { x: 0, y: 0 };
       const now = performance.now();
-      if (isTap && (event && (event.pointerType === "pen" || event.pointerType === "touch"))) {
+      if (isTap && event && event.pointerType === "pen") {
         if (lastTeacherTipTap && (now - lastTeacherTipTap.time < 380) && Math.hypot(pt.x - lastTeacherTipTap.x, pt.y - lastTeacherTipTap.y) < 0.04) {
           lastTeacherTipTap = null;
           teacherInkActiveStroke = null;
@@ -4107,7 +4106,7 @@
       const isTap = !reviewMoved && duration < 240;
       const pt = reviewStartPoint || (reviewActiveStroke && reviewActiveStroke.points[0]) || { x: 0, y: 0 };
       const now = performance.now();
-      if (isTap && (event && (event.pointerType === "pen" || event.pointerType === "touch"))) {
+      if (isTap && event && event.pointerType === "pen") {
         if (lastReviewTipTap && (now - lastReviewTipTap.time < 380) && Math.hypot(pt.x - lastReviewTipTap.x, pt.y - lastReviewTipTap.y) < 0.04) {
           lastReviewTipTap = null;
           reviewActiveStroke = null;
