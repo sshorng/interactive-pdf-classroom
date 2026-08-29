@@ -438,6 +438,9 @@
     .toast { padding: 12px 14px; color: var(--teal-dark); background: #f1f8f2; border: 1px solid #c9e0cf; border-radius: 12px; box-shadow: var(--shadow-soft); animation: toastIn .2s ease; font-size: 13px; }
     .toast.warning { color: #805d31; background: #fff5dd; border-color: #ead4a5; }
     .toast.error { color: var(--danger); background: #fff2ee; border-color: #ecc7be; }
+    .pull-refresh-indicator { position: fixed; top: -60px; left: 50%; transform: translateX(-50%); z-index: 9999; display: inline-flex; align-items: center; gap: 8px; padding: 8px 18px; color: var(--teal-dark); background: rgba(255,255,255,.96); border: 1px solid rgba(49,95,89,.22); border-radius: 999px; box-shadow: 0 8px 24px rgba(33,72,66,.18); font-size: 13px; font-weight: 700; pointer-events: none; transition: top .2s cubic-bezier(.2,.8,.3,1), opacity .2s ease; opacity: 0; }
+    .pull-refresh-indicator.visible { opacity: 1; }
+    .pull-refresh-indicator.refreshing .pull-icon { display: inline-block; animation: spin .8s linear infinite; }
 
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     @keyframes popIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -495,6 +498,7 @@
   </style>
 </head>
 <body>
+  <div class="pull-refresh-indicator" id="pullRefreshIndicator"><span class="pull-icon">↓</span><span class="pull-text">下拉重新整理</span></div>
   <div class="app-shell">
     <header class="topbar">
       <a class="brand" href="#" id="brandHome">墨卷<span>互動講義批改</span></a>
@@ -919,6 +923,112 @@
       document.addEventListener("gesturestart", function (event) { event.preventDefault(); });
       document.addEventListener("gesturechange", function (event) { event.preventDefault(); });
       document.addEventListener("gestureend", function (event) { event.preventDefault(); });
+      bindPullToRefresh();
+    }
+
+    async function refreshCurrentView() {
+      try {
+        if (state.view === "manager") {
+          const result = await managerApi("listBoards", {});
+          for (const board of result.data || []) await cacheBoardLocally(board);
+          await pruneStaleLocalBoards(result.data || []);
+          renderBoardCards();
+        } else if (state.view === "student" && state.boardId) {
+          await loadBoardContext(state.boardId);
+          await loadStudentSubmissions();
+          await loadClassroomSync();
+          renderStudentAreaList();
+          renderZones();
+        } else if (state.view === "review" && state.boardId) {
+          await loadBoardContext(state.boardId);
+          await loadClassroomSync();
+          await loadClassroomSubmissions();
+          renderClassroomSidebar();
+          renderZones();
+          renderTeacherInk();
+        } else if (state.view === "editor" && state.boardId) {
+          await loadBoardContext(state.boardId);
+          renderEditorAreaList();
+          renderZones();
+          renderTeacherInk();
+        }
+        showToast("已更新至最新資料。", "success");
+      } catch (error) {
+        showToast("重新整理失敗：" + (error.message || "網路連線異常。"), "error");
+      }
+    }
+
+    function bindPullToRefresh() {
+      let startY = 0;
+      let isPulling = false;
+      let isRefreshing = false;
+      const threshold = 70;
+      const indicator = document.getElementById("pullRefreshIndicator");
+      if (!indicator) return;
+      const icon = indicator.querySelector(".pull-icon");
+      const text = indicator.querySelector(".pull-text");
+
+      window.addEventListener("touchstart", function (event) {
+        if (isRefreshing || state.drawingInk || event.touches.length !== 1) return;
+        const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+        const target = event.target;
+        if (target && target.closest && target.closest(".modal-card, .review-panel, textarea, input, select")) return;
+        if (scrollY <= 5) {
+          startY = event.touches[0].clientY;
+          isPulling = true;
+        }
+      }, { passive: true });
+
+      window.addEventListener("touchmove", function (event) {
+        if (!isPulling || isRefreshing || event.touches.length !== 1) return;
+        const currentY = event.touches[0].clientY;
+        const diff = currentY - startY;
+        if (diff > 10) {
+          const distance = Math.min(95, diff * 0.45);
+          indicator.style.top = (distance - 42) + "px";
+          indicator.classList.add("visible");
+          if (distance >= threshold * 0.45) {
+            if (icon) icon.textContent = "↑";
+            if (text) text.textContent = "釋放立即重新整理";
+          } else {
+            if (icon) icon.textContent = "↓";
+            if (text) text.textContent = "下拉重新整理";
+          }
+        } else {
+          indicator.classList.remove("visible");
+        }
+      }, { passive: true });
+
+      window.addEventListener("touchend", async function (event) {
+        if (!isPulling || isRefreshing) { isPulling = false; return; }
+        isPulling = false;
+        const touch = event.changedTouches[0];
+        if (!touch) return;
+        const diff = touch.clientY - startY;
+        if (diff * 0.45 >= threshold * 0.45) {
+          isRefreshing = true;
+          indicator.style.top = "18px";
+          indicator.classList.add("visible", "refreshing");
+          if (icon) icon.textContent = "↻";
+          if (text) text.textContent = "正在重新整理……";
+          await refreshCurrentView();
+          indicator.classList.remove("refreshing");
+          indicator.style.top = "-60px";
+          indicator.classList.remove("visible");
+          isRefreshing = false;
+        } else {
+          indicator.style.top = "-60px";
+          indicator.classList.remove("visible");
+        }
+      }, { passive: true });
+
+      window.addEventListener("touchcancel", function () {
+        isPulling = false;
+        if (!isRefreshing) {
+          indicator.style.top = "-60px";
+          indicator.classList.remove("visible");
+        }
+      }, { passive: true });
     }
 
     async function refreshSheetLink() {
