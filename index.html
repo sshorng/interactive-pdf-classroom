@@ -2386,8 +2386,14 @@
         return;
       }
       if (!teacherInkActiveStroke) return;
-      if (teacherInkActiveStroke.tool === "shape") {
-        teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], lastPoint];
+      if (teacherInkActiveStroke.tool === "shape" || teacherInkActiveStroke.tool === "highlighter") {
+        if (teacherInkActiveStroke.tool === "shape") {
+          teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], lastPoint];
+        } else {
+          events.forEach(function (item) {
+            teacherInkActiveStroke.points.push(canvasPoint(item, canvas));
+          });
+        }
         renderTeacherInk();
       } else {
         events.forEach(function (item) {
@@ -4076,8 +4082,14 @@
           events.forEach(function (item) { eraseReviewStrokeAt(canvasPoint(item, canvas)); });
           return;
         }
-        if (reviewActiveStroke.tool === "shape") {
-          reviewActiveStroke.points = [reviewActiveStroke.points[0], lastPoint];
+        if (reviewActiveStroke.tool === "shape" || reviewActiveStroke.tool === "highlighter") {
+          if (reviewActiveStroke.tool === "shape") {
+            reviewActiveStroke.points = [reviewActiveStroke.points[0], lastPoint];
+          } else {
+            events.forEach(function (item) {
+              reviewActiveStroke.points.push(canvasPoint(item, canvas));
+            });
+          }
           drawReviewCanvas();
         } else {
           events.forEach(function (item) {
