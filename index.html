@@ -217,8 +217,10 @@
     .ink-swatch { width: 25px; height: 25px; border: 2px solid rgba(255,255,255,.9); border-radius: 50%; box-shadow: 0 0 0 1px #cfd0c8; }
     .ink-swatch.active { box-shadow: 0 0 0 2px var(--teal); }
     .ink-custom-color { width: 30px; height: 30px; padding: 2px; border: 1px solid #d5d5cb; border-radius: 8px; }
-    .ink-width-range { width: 70px; accent-color: var(--accent); }
-    .ink-width-label { min-width: 27px; color: var(--muted); font-size: 11px; }
+    .ink-width-selector, .review-width-selector { display: inline-flex; align-items: center; gap: 2px; padding: 2px; background: rgba(255,255,255,.6); border: 1px solid #d5d5cb; border-radius: 9px; }
+    .ink-width-btn, .review-width-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--teal-dark); background: transparent; border: 1px solid transparent; border-radius: 7px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all .15s ease; }
+    .ink-width-btn:hover, .review-width-btn:hover { background: rgba(255,255,255,.9); }
+    .ink-width-btn.active, .review-width-btn.active { color: #fffaf4; background: var(--teal); border-color: var(--teal); }
     .ink-shape-buttons { display: inline-flex; align-items: center; gap: 3px; padding-left: 3px; border-left: 1px solid #d5d5cb; }
     .ink-shape-buttons[hidden] { display: none; }
     .ink-status { color: var(--muted); font-size: 11px; white-space: nowrap; }
@@ -552,7 +554,7 @@
     const MAX_IMAGE_COUNT = 3;
     const MAX_PDF_BYTES = 20 * 1024 * 1024;
     const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
-    const INK_WIDTH_STEPS = [2, 4, 6, 8, 12, 16];
+    const INK_WIDTH_STEPS = [2, 4, 6, 8];
     const GAS_URL = resolveGasUrl();
 
     if (window.pdfjsLib) {
@@ -1659,7 +1661,7 @@
         const controls = document.createElement("div");
         controls.id = "inkControls";
         controls.className = "ink-controls";
-        controls.innerHTML = "<button class=\"ink-icon-button active\" data-ink-tool=\"pen\" type=\"button\" title=\"手寫筆\" aria-label=\"手寫筆\">✎</button><button class=\"ink-icon-button\" data-ink-tool=\"highlighter\" type=\"button\" title=\"螢光筆\" aria-label=\"螢光筆\">▰</button><button class=\"ink-icon-button\" data-ink-tool=\"shape\" type=\"button\" title=\"圖形\" aria-label=\"圖形\">◇</button><span class=\"ink-shape-buttons\" id=\"inkShapeButtons\" hidden><button class=\"ink-icon-button\" data-ink-shape=\"arrow\" type=\"button\" title=\"箭頭\" aria-label=\"箭頭\">➜</button><button class=\"ink-icon-button\" data-ink-shape=\"line\" type=\"button\" title=\"直線\" aria-label=\"直線\">╱</button><button class=\"ink-icon-button\" data-ink-shape=\"rect\" type=\"button\" title=\"矩形\" aria-label=\"矩形\">□</button><button class=\"ink-icon-button\" data-ink-shape=\"circle\" type=\"button\" title=\"圓形\" aria-label=\"圓形\">○</button></span><button class=\"ink-icon-button\" data-ink-tool=\"eraser\" type=\"button\" title=\"橡皮擦\" aria-label=\"橡皮擦\">⌫</button><span class=\"ink-palette\" aria-label=\"常用顏色\"><button class=\"ink-swatch active\" data-ink-color=\"#c47f78\" style=\"background:#c47f78\" type=\"button\" title=\"豆沙玫瑰\" aria-label=\"豆沙玫瑰\"></button><button class=\"ink-swatch\" data-ink-color=\"#9eaaa0\" style=\"background:#9eaaa0\" type=\"button\" title=\"鼠尾草綠\" aria-label=\"鼠尾草綠\"></button><button class=\"ink-swatch\" data-ink-color=\"#91a6b5\" style=\"background:#91a6b5\" type=\"button\" title=\"霧藍\" aria-label=\"霧藍\"></button><button class=\"ink-swatch\" data-ink-color=\"#a99db8\" style=\"background:#a99db8\" type=\"button\" title=\"灰紫\" aria-label=\"灰紫\"></button><button class=\"ink-swatch\" data-ink-color=\"#c1a477\" style=\"background:#c1a477\" type=\"button\" title=\"奶茶棕\" aria-label=\"奶茶棕\"></button></span><input id=\"inkColorField\" class=\"ink-custom-color\" type=\"color\" value=\"#c47f78\" title=\"自訂顏色\" aria-label=\"自訂顏色\"><input id=\"inkWidthField\" class=\"ink-width-range\" type=\"range\" min=\"1\" max=\"6\" step=\"1\" value=\"3\" title=\"筆畫粗細，共六段\" aria-label=\"筆畫粗細，共六段\"><span class=\"ink-width-label\" id=\"inkWidthLabel\">6</span><button class=\"ink-icon-button\" id=\"undoTeacherInkButton\" type=\"button\" title=\"復原一筆\" aria-label=\"復原一筆\">↶</button><button class=\"ink-icon-button danger\" id=\"clearTeacherInkButton\" type=\"button\" title=\"清除本頁手寫\" aria-label=\"清除本頁手寫\">⌫</button><button class=\"ink-icon-button danger\" id=\"clearAllTeacherInkButton\" type=\"button\" title=\"全部清除\" aria-label=\"全部清除\">⊗</button><span class=\"ink-status\" id=\"inkStatus\">手寫模式中（支援 Apple Pencil、觸控筆與手繪）</span>";
+        controls.innerHTML = "<button class=\"ink-icon-button active\" data-ink-tool=\"pen\" type=\"button\" title=\"手寫筆\" aria-label=\"手寫筆\">✎</button><button class=\"ink-icon-button\" data-ink-tool=\"highlighter\" type=\"button\" title=\"螢光筆\" aria-label=\"螢光筆\">▰</button><button class=\"ink-icon-button\" data-ink-tool=\"shape\" type=\"button\" title=\"圖形\" aria-label=\"圖形\">◇</button><span class=\"ink-shape-buttons\" id=\"inkShapeButtons\" hidden><button class=\"ink-icon-button\" data-ink-shape=\"arrow\" type=\"button\" title=\"箭頭\" aria-label=\"箭頭\">➜</button><button class=\"ink-icon-button\" data-ink-shape=\"line\" type=\"button\" title=\"直線\" aria-label=\"直線\">╱</button><button class=\"ink-icon-button\" data-ink-shape=\"rect\" type=\"button\" title=\"矩形\" aria-label=\"矩形\">□</button><button class=\"ink-icon-button\" data-ink-shape=\"circle\" type=\"button\" title=\"圓形\" aria-label=\"圓形\">○</button></span><button class=\"ink-icon-button\" data-ink-tool=\"eraser\" type=\"button\" title=\"橡皮擦\" aria-label=\"橡皮擦\">⌫</button><span class=\"ink-palette\" aria-label=\"常用顏色\"><button class=\"ink-swatch active\" data-ink-color=\"#c47f78\" style=\"background:#c47f78\" type=\"button\" title=\"豆沙玫瑰\" aria-label=\"豆沙玫瑰\"></button><button class=\"ink-swatch\" data-ink-color=\"#9eaaa0\" style=\"background:#9eaaa0\" type=\"button\" title=\"鼠尾草綠\" aria-label=\"鼠尾草綠\"></button><button class=\"ink-swatch\" data-ink-color=\"#91a6b5\" style=\"background:#91a6b5\" type=\"button\" title=\"霧藍\" aria-label=\"霧藍\"></button><button class=\"ink-swatch\" data-ink-color=\"#a99db8\" style=\"background:#a99db8\" type=\"button\" title=\"灰紫\" aria-label=\"灰紫\"></button><button class=\"ink-swatch\" data-ink-color=\"#c1a477\" style=\"background:#c1a477\" type=\"button\" title=\"奶茶棕\" aria-label=\"奶茶棕\"></button></span><input id=\"inkColorField\" class=\"ink-custom-color\" type=\"color\" value=\"#c47f78\" title=\"自訂顏色\" aria-label=\"自訂顏色\"><span class=\"ink-width-selector\" id=\"inkWidthSelector\" aria-label=\"筆畫粗細\"><button class=\"ink-width-btn\" data-ink-width=\"2\" type=\"button\" title=\"細 (2px)\" aria-label=\"細 2px\">2</button><button class=\"ink-width-btn active\" data-ink-width=\"4\" type=\"button\" title=\"適中 (4px)\" aria-label=\"適中 4px\">4</button><button class=\"ink-width-btn\" data-ink-width=\"6\" type=\"button\" title=\"粗 (6px)\" aria-label=\"粗 6px\">6</button><button class=\"ink-width-btn\" data-ink-width=\"8\" type=\"button\" title=\"特粗 (8px)\" aria-label=\"特粗 8px\">8</button></span><button class=\"ink-icon-button\" id=\"undoTeacherInkButton\" type=\"button\" title=\"復原一筆\" aria-label=\"復原一筆\">↶</button><button class=\"ink-icon-button danger\" id=\"clearTeacherInkButton\" type=\"button\" title=\"清除本頁手寫\" aria-label=\"清除本頁手寫\">⌫</button><button class=\"ink-icon-button danger\" id=\"clearAllTeacherInkButton\" type=\"button\" title=\"全部清除\" aria-label=\"全部清除\">⊗</button><span class=\"ink-status\" id=\"inkStatus\">手寫模式中（支援 Apple Pencil、觸控筆與手繪）</span>";
         toolbar.appendChild(controls);
         bindInkControls();
       }
@@ -1824,28 +1826,29 @@
     function bindInkControls() {
       const controls = document.getElementById("inkControls");
       const color = document.getElementById("inkColorField");
-      const width = document.getElementById("inkWidthField");
       if (!controls || controls.dataset.bound === "1") return;
       controls.dataset.bound = "1";
       controls.querySelectorAll("[data-ink-tool]").forEach(function (button) { button.addEventListener("click", function () { state.inkTool = button.dataset.inkTool; updateInkControls(); }); });
       controls.querySelectorAll("[data-ink-shape]").forEach(function (button) { button.addEventListener("click", function () { state.inkShape = button.dataset.inkShape; updateInkControls(); }); });
       controls.querySelectorAll("[data-ink-color]").forEach(function (button) { button.addEventListener("click", function () { state.inkColor = button.dataset.inkColor; updateInkControls(); }); });
-      color.addEventListener("input", function (event) { state.inkColor = event.target.value; });
-      width.addEventListener("input", function (event) { state.inkWidth = INK_WIDTH_STEPS[clamp(Number(event.target.value) - 1, 0, INK_WIDTH_STEPS.length - 1)]; updateInkControls(); });
+      controls.querySelectorAll("[data-ink-width]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          state.inkWidth = Number(button.dataset.inkWidth) || 4;
+          updateInkControls();
+        });
+      });
+      if (color) color.addEventListener("input", function (event) { state.inkColor = event.target.value; });
     }
 
     function updateInkControls() {
       const color = document.getElementById("inkColorField");
-      const width = document.getElementById("inkWidthField");
-      const widthLabel = document.getElementById("inkWidthLabel");
       const button = document.getElementById("teacherInkButton");
       const shapeButtons = document.getElementById("inkShapeButtons");
       document.querySelectorAll("[data-ink-tool]").forEach(function (item) { item.classList.toggle("active", item.dataset.inkTool === state.inkTool); });
       document.querySelectorAll("[data-ink-shape]").forEach(function (item) { item.classList.toggle("active", item.dataset.inkShape === state.inkShape); });
       document.querySelectorAll("[data-ink-color]").forEach(function (item) { item.classList.toggle("active", item.dataset.inkColor.toLowerCase() === state.inkColor.toLowerCase()); });
+      document.querySelectorAll("[data-ink-width]").forEach(function (item) { item.classList.toggle("active", Number(item.dataset.inkWidth) === Number(state.inkWidth)); });
       if (color) color.value = state.inkColor;
-      if (width) width.value = Math.max(1, INK_WIDTH_STEPS.indexOf(state.inkWidth) + 1);
-      if (widthLabel) widthLabel.textContent = state.inkWidth;
       if (shapeButtons) shapeButtons.hidden = state.inkTool !== "shape";
       if (button) { button.classList.toggle("active", state.drawingInk); button.textContent = state.drawingInk ? "停止手寫" : "✎ 手寫"; }
       const canvas = document.getElementById("inkCanvas");
@@ -2089,8 +2092,10 @@
 
     function eraseTeacherInkAt(point) {
       const strokes = teacherInkForPage(state.currentPage);
-      const threshold = Math.max(0.012, (state.inkWidth / 800) * 1.8);
       const kept = strokes.filter(function (stroke) {
+        const strokeW = Number(stroke.width || .005);
+        const mult = stroke.tool === "highlighter" ? 6 : 1;
+        const threshold = Math.max(0.015, strokeW * mult * 1.6);
         const points = Array.isArray(stroke.points) ? stroke.points : [];
         for (let index = 0; index < points.length; index += 1) {
           if (distanceToSegment(point, points[index], points[index + 1] || points[index]) <= threshold) return false;
@@ -2151,14 +2156,14 @@
       if (!points.length) return;
       const first = { x: Number(points[0].x || 0) * width, y: Number(points[0].y || 0) * height };
       const last = { x: Number(points[points.length - 1].x || 0) * width, y: Number(points[points.length - 1].y || 0) * height };
-      const lineWidth = Math.max(1, Number(stroke.width || .006) * Math.min(width, height));
+      const baseWidth = Math.max(1, Number(stroke.width || .005) * Math.min(width, height));
       context.save();
       context.strokeStyle = stroke.color || "#d34f42";
       context.fillStyle = stroke.color || "#d34f42";
-      context.lineWidth = stroke.tool === "highlighter" ? lineWidth * 3 : lineWidth;
+      context.lineWidth = stroke.tool === "highlighter" ? Math.max(16, baseWidth * 6) : baseWidth;
       context.lineCap = "round";
       context.lineJoin = "round";
-      if (stroke.tool === "highlighter") context.globalAlpha = .28;
+      if (stroke.tool === "highlighter") context.globalAlpha = .35;
       if (stroke.tool === "shape") {
         if (stroke.shape === "rect") context.strokeRect(first.x, first.y, last.x - first.x, last.y - first.y);
         else if (stroke.shape === "circle") {
@@ -3237,14 +3242,22 @@
       state.reviewPhotoIndex = clamp(feedback.photoIndex, 0, Math.max(0, (submission.imageFileIds || []).length - 1));
       state.reviewStrokes = JSON.parse(JSON.stringify(feedback.strokes || []));
       state.reviewComment = submission.teacherComment || "";
-       panel.innerHTML = "<div class=\"review-meta\"><div><p class=\"eyebrow\">" + escapeHtml(areaTitle(submission.areaId)) + "</p><h2>" + escapeHtml(submission.nickname || "未填暱稱") + "的作答</h2><p>送出於 " + escapeHtml(formatTime(submission.createdAt)) + "，最近更新於 " + escapeHtml(formatTime(submission.updatedAt)) + "</p></div><span class=\"meta-chip\">" + escapeHtml(submission.status || "待批改") + "</span></div><div class=\"review-toolbar\"><label>筆色 <input type=\"color\" id=\"reviewColorField\" value=\"" + escapeHtml(state.reviewColor) + "\"></label><label>粗細 <input type=\"range\" id=\"reviewWidthField\" min=\"2\" max=\"16\" value=\"" + state.reviewWidth + "\"><span id=\"reviewWidthLabel\">" + state.reviewWidth + " px</span></label><button class=\"button small subtle\" id=\"undoStrokeButton\" type=\"button\">復原一筆</button><button class=\"button small danger\" id=\"clearStrokesButton\" type=\"button\">清除筆跡</button></div><div class=\"photo-tabs\" id=\"reviewPhotoTabs\"></div><div class=\"review-image-stage\" id=\"reviewImageStage\"><div class=\"inline-message\">正在載入答案照片……</div></div><div class=\"review-text-answer\"><strong>文字答案</strong><br>" + escapeHtml(submission.text || "學生沒有另外輸入文字。") + "</div><div class=\"review-bottom\"><div><label for=\"teacherCommentField\" class=\"helper\">教師評語</label><textarea id=\"teacherCommentField\" maxlength=\"1000\" placeholder=\"寫下給學生的提醒或回饋……\">" + escapeHtml(state.reviewComment) + "</textarea></div><div class=\"review-bottom-actions\"><button class=\"button small\" id=\"exportCurrentButton\" type=\"button\">下載批改圖</button><button class=\"button primary small\" id=\"saveFeedbackButton\" type=\"button\">儲存教師批改</button></div></div>";
+       panel.innerHTML = "<div class=\"review-meta\"><div><p class=\"eyebrow\">" + escapeHtml(areaTitle(submission.areaId)) + "</p><h2>" + escapeHtml(submission.nickname || "未填暱稱") + "的作答</h2><p>送出於 " + escapeHtml(formatTime(submission.createdAt)) + "，最近更新於 " + escapeHtml(formatTime(submission.updatedAt)) + "</p></div><span class=\"meta-chip\">" + escapeHtml(submission.status || "待批改") + "</span></div><div class=\"review-toolbar\"><label>筆色 <input type=\"color\" id=\"reviewColorField\" value=\"" + escapeHtml(state.reviewColor) + "\"></label><label>粗細 <span class=\"review-width-selector\"><button class=\"review-width-btn\" data-review-width=\"2\" type=\"button\">2</button><button class=\"review-width-btn active\" data-review-width=\"4\" type=\"button\">4</button><button class=\"review-width-btn\" data-review-width=\"6\" type=\"button\">6</button><button class=\"review-width-btn\" data-review-width=\"8\" type=\"button\">8</button></span></label><button class=\"button small subtle\" id=\"undoStrokeButton\" type=\"button\">復原一筆</button><button class=\"button small danger\" id=\"clearStrokesButton\" type=\"button\">清除筆跡</button></div><div class=\"photo-tabs\" id=\"reviewPhotoTabs\"></div><div class=\"review-image-stage\" id=\"reviewImageStage\"><div class=\"inline-message\">正在載入答案照片……</div></div><div class=\"review-text-answer\"><strong>文字答案</strong><br>" + escapeHtml(submission.text || "學生沒有另外輸入文字。") + "</div><div class=\"review-bottom\"><div><label for=\"teacherCommentField\" class=\"helper\">教師評語</label><textarea id=\"teacherCommentField\" maxlength=\"1000\" placeholder=\"寫下給學生的提醒或回饋……\">" + escapeHtml(state.reviewComment) + "</textarea></div><div class=\"review-bottom-actions\"><button class=\"button small\" id=\"exportCurrentButton\" type=\"button\">下載批改圖</button><button class=\"button primary small\" id=\"saveFeedbackButton\" type=\"button\">儲存教師批改</button></div></div>";
        const reviewMeta = panel.querySelector(".review-meta");
        if (reviewMeta) reviewMeta.remove();
       const exportButton = document.getElementById("exportCurrentButton");
       if (exportButton) exportButton.remove();
       setupReviewInkControls();
       document.getElementById("reviewColorField").addEventListener("input", function (event) { state.reviewColor = event.target.value; });
-      document.getElementById("reviewWidthField").addEventListener("input", function (event) { state.reviewWidth = Number(event.target.value); document.getElementById("reviewWidthLabel").textContent = state.reviewWidth + " px"; });
+      panel.querySelectorAll("[data-review-width]").forEach(function (btn) {
+        btn.classList.toggle("active", Number(btn.dataset.reviewWidth) === state.reviewWidth);
+        btn.addEventListener("click", function () {
+          state.reviewWidth = Number(btn.dataset.reviewWidth) || 4;
+          panel.querySelectorAll("[data-review-width]").forEach(function (item) {
+            item.classList.toggle("active", Number(item.dataset.reviewWidth) === state.reviewWidth);
+          });
+        });
+      });
       document.getElementById("undoStrokeButton").addEventListener("click", function () { state.reviewStrokes.pop(); drawReviewCanvas(); });
       document.getElementById("clearStrokesButton").addEventListener("click", clearReviewStrokes);
       document.getElementById("teacherCommentField").addEventListener("input", function (event) { state.reviewComment = event.target.value; });
