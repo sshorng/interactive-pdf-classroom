@@ -539,9 +539,9 @@
   <script>
     // ============================================================
     // GAS URL 優先序：原始碼預設值 > 網址參數 > LocalStorage > 設定視窗
-    // 若要固定部署網址，將空字串換成實際 GAS Web App 網址即可。
+    // GAS Web App 網址直接寫在 DEFAULT_GAS_URL，分享網址不再需要額外設定。
     // ============================================================
-    const DEFAULT_GAS_URL = "";
+    const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbz4n8969la0hbjNCno3HM5dR0mvMbL8rvbom08wrquC8Ah8QhGjoMUAdcxF9uJl_5Kt7w/exec";
     const APP_KEY = "pdfw_";
     const DB_NAME = "pdfw_local_v1";
     const MAX_IMAGE_COUNT = 3;
@@ -581,7 +581,7 @@
       inkTool: "pen",
       inkShape: "arrow",
       inkColor: "#c47f78",
-      inkWidth: 6,
+      inkWidth: 4,
       inkSaveTimer: null,
       classroomStateTimer: null,
       submissions: [],
@@ -592,7 +592,7 @@
       reviewStrokes: [],
       reviewComment: "",
       reviewColor: "#d34f42",
-      reviewWidth: 6,
+      reviewWidth: 4,
       reviewTool: "pen",
       reviewShape: "arrow",
       adminToken: localStorage.getItem(APP_KEY + "admin_token") || "",
