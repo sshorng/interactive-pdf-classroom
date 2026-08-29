@@ -329,6 +329,8 @@
     .classroom-toolbar-title { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin-right: auto; color: var(--teal-dark); font-size: 13px; font-weight: 800; white-space: nowrap; }
     .classroom-toolbar-title button { min-height: 40px; padding: 7px 10px; color: var(--teal-dark); background: transparent; border: 1px solid #d5d5cb; border-radius: 9px; }
     .classroom-toolbar-title button:hover { background: #fff; border-color: #aac6ba; }
+    .classroom-toolbar-title .button-share { background: #f3f7f5; border-color: #b7d5c9; color: var(--teal-dark); font-weight: 700; }
+    .classroom-toolbar-title .button-share:hover { background: #e6f1ec; border-color: var(--teal); }
     .classroom-page-nav, .student-page-nav, .editor-page-nav { position: absolute; right: 0; bottom: 12px; left: 0; z-index: 11; display: flex; justify-content: center; pointer-events: none; }
     .classroom-page-nav .toolbar-group, .student-page-nav .toolbar-group, .editor-page-nav .toolbar-group { padding: 5px 7px; background: rgba(239, 237, 230, .94); border: 1px solid rgba(213, 213, 203, .95); border-radius: 13px; box-shadow: 0 7px 20px rgba(38, 45, 41, .16); pointer-events: auto; backdrop-filter: blur(12px); }
     .student-page-nav { bottom: 12px; }
@@ -2894,8 +2896,15 @@
         back.textContent = "離開課堂";
         const name = document.createElement("span");
         name.textContent = state.board.name;
+        const share = document.createElement("button");
+        share.id = "classroomShareButton";
+        share.className = "button-share";
+        share.type = "button";
+        share.title = "開啟學生連線 QR Code";
+        share.textContent = "⌁ 學生連線";
         title.appendChild(back);
         title.appendChild(name);
+        title.appendChild(share);
         toolbar.insertBefore(title, toolbar.firstChild);
       }
       setupTeacherPdfWorkspace();
@@ -2969,6 +2978,12 @@
       document.getElementById("zoomInButton").addEventListener("click", function () { setZoom(state.zoom + .1); });
       document.getElementById("fitButton").addEventListener("click", fitPdfToScroll);
        document.getElementById("classroomBackButton").addEventListener("click", function () { goView("manager"); });
+       const shareButton = document.getElementById("classroomShareButton");
+       if (shareButton) {
+         shareButton.addEventListener("click", function () {
+           if (state.board) openShareModal(state.board);
+         });
+       }
        bindTeacherInkToolbarEvents();
        bindTeacherInkCanvas();
        bindTeacherInkToggleGesture(document.querySelector(".classroom-pdf-panel .pdf-scroll"));
