@@ -193,8 +193,9 @@
     .pdf-scroll { min-height: 620px; overflow: auto; padding: 34px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-x pan-y; }
     .page-stage { position: relative; width: max-content; min-width: 340px; min-height: 440px; margin: 0 auto; background: #fff; box-shadow: 0 18px 38px rgba(38, 45, 41, .18); }
     .page-stage canvas { display: block; }
-    .zone-layer { position: absolute; inset: 0; touch-action: auto; z-index: 4; }
-    .zone-layer.is-placing { cursor: crosshair; touch-action: none; }
+    .zone-layer { position: absolute; inset: 0; pointer-events: none; touch-action: auto; z-index: 4; }
+    .zone-layer .zone { pointer-events: auto; }
+    .zone-layer.is-placing { pointer-events: auto; cursor: crosshair; touch-action: none; }
     .zone-layer.ink-mode { pointer-events: none; }
     .zone { position: absolute; z-index: 2; display: grid; place-items: center; width: 32px; height: 32px; min-width: 32px; max-width: 32px; padding: 0; overflow: visible; color: #fffaf4; background: var(--accent); border: 2px solid #fff8ee; border-radius: 50% 50% 50% 0; text-align: center; box-shadow: 0 5px 14px rgba(49,95,89,.25); transform: translate(-50%, -50%) rotate(-45deg); }
     .zone::before, .zone::after { content: none; }
@@ -204,9 +205,9 @@
     .zone-status { display: none; }
     body.editor-mode .zone { cursor: grab; touch-action: none; }
     body.editor-mode .zone:active { cursor: grabbing; }
-    .ink-layer { position: absolute; inset: 0; z-index: 3; display: none; width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
+    .ink-layer { position: absolute; inset: 0; z-index: 3; display: none; width: 100%; height: 100%; touch-action: pan-x pan-y; user-select: none; -webkit-user-select: none; }
     .page-stage .ink-layer.visible { display: block; }
-    .page-stage .ink-layer.is-drawing { display: block; cursor: crosshair; }
+    .page-stage .ink-layer.is-drawing { display: block; cursor: crosshair; touch-action: none; }
     .ink-controls { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 4px; min-width: max-content; }
     .ink-icon-button, .ink-swatch { display: inline-grid; flex: 0 0 auto; place-items: center; width: 36px; height: 36px; padding: 0; color: var(--teal-dark); background: rgba(255,255,255,.72); border: 1px solid #d5d5cb; border-radius: 9px; font-size: 18px; }
     .ink-icon-button:hover, .ink-icon-button.active { color: #fffaf4; background: var(--teal); border-color: var(--teal); }
@@ -1652,7 +1653,7 @@
         const controls = document.createElement("div");
         controls.id = "inkControls";
         controls.className = "ink-controls";
-        controls.innerHTML = "<button class=\"ink-icon-button active\" data-ink-tool=\"pen\" type=\"button\" title=\"手寫筆\" aria-label=\"手寫筆\">✎</button><button class=\"ink-icon-button\" data-ink-tool=\"highlighter\" type=\"button\" title=\"螢光筆\" aria-label=\"螢光筆\">▰</button><button class=\"ink-icon-button\" data-ink-tool=\"shape\" type=\"button\" title=\"圖形\" aria-label=\"圖形\">◇</button><span class=\"ink-shape-buttons\" id=\"inkShapeButtons\" hidden><button class=\"ink-icon-button\" data-ink-shape=\"arrow\" type=\"button\" title=\"箭頭\" aria-label=\"箭頭\">➜</button><button class=\"ink-icon-button\" data-ink-shape=\"line\" type=\"button\" title=\"直線\" aria-label=\"直線\">╱</button><button class=\"ink-icon-button\" data-ink-shape=\"rect\" type=\"button\" title=\"矩形\" aria-label=\"矩形\">□</button><button class=\"ink-icon-button\" data-ink-shape=\"circle\" type=\"button\" title=\"圓形\" aria-label=\"圓形\">○</button></span><button class=\"ink-icon-button\" data-ink-tool=\"eraser\" type=\"button\" title=\"橡皮擦\" aria-label=\"橡皮擦\">⌫</button><span class=\"ink-palette\" aria-label=\"常用顏色\"><button class=\"ink-swatch active\" data-ink-color=\"#c47f78\" style=\"background:#c47f78\" type=\"button\" title=\"豆沙玫瑰\" aria-label=\"豆沙玫瑰\"></button><button class=\"ink-swatch\" data-ink-color=\"#9eaaa0\" style=\"background:#9eaaa0\" type=\"button\" title=\"鼠尾草綠\" aria-label=\"鼠尾草綠\"></button><button class=\"ink-swatch\" data-ink-color=\"#91a6b5\" style=\"background:#91a6b5\" type=\"button\" title=\"霧藍\" aria-label=\"霧藍\"></button><button class=\"ink-swatch\" data-ink-color=\"#a99db8\" style=\"background:#a99db8\" type=\"button\" title=\"灰紫\" aria-label=\"灰紫\"></button><button class=\"ink-swatch\" data-ink-color=\"#c1a477\" style=\"background:#c1a477\" type=\"button\" title=\"奶茶棕\" aria-label=\"奶茶棕\"></button></span><input id=\"inkColorField\" class=\"ink-custom-color\" type=\"color\" value=\"#c47f78\" title=\"自訂顏色\" aria-label=\"自訂顏色\"><input id=\"inkWidthField\" class=\"ink-width-range\" type=\"range\" min=\"1\" max=\"6\" step=\"1\" value=\"3\" title=\"筆畫粗細，共六段\" aria-label=\"筆畫粗細，共六段\"><span class=\"ink-width-label\" id=\"inkWidthLabel\">6</span><button class=\"ink-icon-button\" id=\"undoTeacherInkButton\" type=\"button\" title=\"復原一筆\" aria-label=\"復原一筆\">↶</button><button class=\"ink-icon-button danger\" id=\"clearTeacherInkButton\" type=\"button\" title=\"清除本頁手寫\" aria-label=\"清除本頁手寫\">⌫</button><button class=\"ink-icon-button danger\" id=\"clearAllTeacherInkButton\" type=\"button\" title=\"全部清除\" aria-label=\"全部清除\">⊗</button><span class=\"ink-status\" id=\"inkStatus\">手寫模式僅接受觸控筆／滑鼠</span>";
+        controls.innerHTML = "<button class=\"ink-icon-button active\" data-ink-tool=\"pen\" type=\"button\" title=\"手寫筆\" aria-label=\"手寫筆\">✎</button><button class=\"ink-icon-button\" data-ink-tool=\"highlighter\" type=\"button\" title=\"螢光筆\" aria-label=\"螢光筆\">▰</button><button class=\"ink-icon-button\" data-ink-tool=\"shape\" type=\"button\" title=\"圖形\" aria-label=\"圖形\">◇</button><span class=\"ink-shape-buttons\" id=\"inkShapeButtons\" hidden><button class=\"ink-icon-button\" data-ink-shape=\"arrow\" type=\"button\" title=\"箭頭\" aria-label=\"箭頭\">➜</button><button class=\"ink-icon-button\" data-ink-shape=\"line\" type=\"button\" title=\"直線\" aria-label=\"直線\">╱</button><button class=\"ink-icon-button\" data-ink-shape=\"rect\" type=\"button\" title=\"矩形\" aria-label=\"矩形\">□</button><button class=\"ink-icon-button\" data-ink-shape=\"circle\" type=\"button\" title=\"圓形\" aria-label=\"圓形\">○</button></span><button class=\"ink-icon-button\" data-ink-tool=\"eraser\" type=\"button\" title=\"橡皮擦\" aria-label=\"橡皮擦\">⌫</button><span class=\"ink-palette\" aria-label=\"常用顏色\"><button class=\"ink-swatch active\" data-ink-color=\"#c47f78\" style=\"background:#c47f78\" type=\"button\" title=\"豆沙玫瑰\" aria-label=\"豆沙玫瑰\"></button><button class=\"ink-swatch\" data-ink-color=\"#9eaaa0\" style=\"background:#9eaaa0\" type=\"button\" title=\"鼠尾草綠\" aria-label=\"鼠尾草綠\"></button><button class=\"ink-swatch\" data-ink-color=\"#91a6b5\" style=\"background:#91a6b5\" type=\"button\" title=\"霧藍\" aria-label=\"霧藍\"></button><button class=\"ink-swatch\" data-ink-color=\"#a99db8\" style=\"background:#a99db8\" type=\"button\" title=\"灰紫\" aria-label=\"灰紫\"></button><button class=\"ink-swatch\" data-ink-color=\"#c1a477\" style=\"background:#c1a477\" type=\"button\" title=\"奶茶棕\" aria-label=\"奶茶棕\"></button></span><input id=\"inkColorField\" class=\"ink-custom-color\" type=\"color\" value=\"#c47f78\" title=\"自訂顏色\" aria-label=\"自訂顏色\"><input id=\"inkWidthField\" class=\"ink-width-range\" type=\"range\" min=\"1\" max=\"6\" step=\"1\" value=\"3\" title=\"筆畫粗細，共六段\" aria-label=\"筆畫粗細，共六段\"><span class=\"ink-width-label\" id=\"inkWidthLabel\">6</span><button class=\"ink-icon-button\" id=\"undoTeacherInkButton\" type=\"button\" title=\"復原一筆\" aria-label=\"復原一筆\">↶</button><button class=\"ink-icon-button danger\" id=\"clearTeacherInkButton\" type=\"button\" title=\"清除本頁手寫\" aria-label=\"清除本頁手寫\">⌫</button><button class=\"ink-icon-button danger\" id=\"clearAllTeacherInkButton\" type=\"button\" title=\"全部清除\" aria-label=\"全部清除\">⊗</button><span class=\"ink-status\" id=\"inkStatus\">手寫模式中（支援 Apple Pencil、觸控筆與手繪）</span>";
         toolbar.appendChild(controls);
         bindInkControls();
       }
@@ -1932,10 +1933,19 @@
     }
 
     function beginTeacherInk(event) {
-      if (!state.drawingInk || !state.pdf || event.pointerType === "touch") return;
+      if (!state.pdf) return;
+      const isPen = event.pointerType === "pen";
+      const isDrawing = Boolean(state.drawingInk);
+      if (!isDrawing && !isPen) return;
+      if (!isDrawing && isPen) {
+        setTeacherInkMode(true);
+        setInkStatus("Apple Pencil 自動啟用手寫");
+      }
       event.preventDefault();
-      const canvas = event.currentTarget;
-      canvas.setPointerCapture(event.pointerId);
+      const canvas = document.getElementById("inkCanvas") || event.currentTarget;
+      if (typeof canvas.setPointerCapture === "function") {
+        try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
+      }
       const point = canvasPoint(event, canvas);
       teacherInkChanged = false;
       if (state.inkTool === "eraser") {
@@ -1948,17 +1958,18 @@
     }
 
     function moveTeacherInk(event) {
-      if (!state.drawingInk || event.pointerType === "touch") return;
+      if (!teacherInkActiveStroke && !teacherInkErasing) return;
       event.preventDefault();
+      const canvas = document.getElementById("inkCanvas") || event.currentTarget;
       const events = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
       if (!events.length) return;
       if (teacherInkErasing) {
-        events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, event.currentTarget)); });
+        events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, canvas)); });
         return;
       }
       if (!teacherInkActiveStroke) return;
-      if (teacherInkActiveStroke.tool === "shape") teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], canvasPoint(events[events.length - 1], event.currentTarget)];
-      else events.forEach(function (item) { teacherInkActiveStroke.points.push(canvasPoint(item, event.currentTarget)); });
+      if (teacherInkActiveStroke.tool === "shape") teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], canvasPoint(events[events.length - 1], canvas)];
+      else events.forEach(function (item) { teacherInkActiveStroke.points.push(canvasPoint(item, canvas)); });
       renderTeacherInk();
     }
 
@@ -2027,7 +2038,7 @@
       const teacherView = state.view === "editor" || state.view === "review" || state.view === "student";
       const strokes = teacherInkForPage(state.currentPage).slice();
       if (teacherInkActiveStroke) strokes.push(teacherInkActiveStroke);
-      canvas.classList.toggle("visible", teacherView && (strokes.length > 0 || state.drawingInk));
+      canvas.classList.toggle("visible", teacherView && (strokes.length > 0 || state.drawingInk || state.view === "review" || state.view === "editor"));
       canvas.classList.toggle("is-drawing", state.drawingInk);
       drawTeacherInkStrokes(canvas, strokes);
     }
@@ -3222,9 +3233,10 @@
       if (!canvas || canvas.dataset.bound === "1") return;
       canvas.dataset.bound = "1";
       canvas.addEventListener("pointerdown", function (event) {
-        if (event.pointerType === "touch") return;
         event.preventDefault();
-        canvas.setPointerCapture(event.pointerId);
+        if (typeof canvas.setPointerCapture === "function") {
+          try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
+        }
         const point = canvasPoint(event, canvas);
         reviewInkChanged = false;
         if (state.reviewTool === "eraser") {
@@ -3236,7 +3248,6 @@
         drawReviewCanvas();
       });
       canvas.addEventListener("pointermove", function (event) {
-        if (event.pointerType === "touch") return;
         if (!reviewActiveStroke && !reviewErasing) return;
         event.preventDefault();
         const events = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
