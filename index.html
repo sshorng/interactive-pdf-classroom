@@ -28,8 +28,27 @@
       --radius: 18px;
     }
 
-    * { box-sizing: border-box; }
-    html, body { margin: 0; min-height: 100%; }
+    * {
+      box-sizing: border-box;
+      -webkit-touch-callout: none;
+    }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    input, textarea, [contenteditable="true"] {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    img, canvas, .page-stage, .pdf-scroll, .review-image-stage, .review-image-wrap, .zone-layer {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-user-drag: none;
+    }
     body {
       color: var(--ink);
       background:
@@ -930,6 +949,21 @@
         showToast("目前離線，資料會先保留在本機。", "warning");
       });
       window.addEventListener("popstate", renderRoute);
+      document.addEventListener("selectstart", function (event) {
+        if (!event.target.closest("input, textarea, [contenteditable='true']")) {
+          event.preventDefault();
+        }
+      });
+      document.addEventListener("contextmenu", function (event) {
+        if (event.target.closest("canvas, .page-stage, .review-image-stage, .pdf-scroll, .zone-layer, .review-image-wrap")) {
+          event.preventDefault();
+        }
+      });
+      document.addEventListener("dragstart", function (event) {
+        if (!event.target.closest("input, textarea")) {
+          event.preventDefault();
+        }
+      });
       document.addEventListener("gesturestart", function (event) { event.preventDefault(); });
       document.addEventListener("gesturechange", function (event) { event.preventDefault(); });
       document.addEventListener("gestureend", function (event) { event.preventDefault(); });
@@ -2396,7 +2430,7 @@
           context.stroke();
           if (stroke.shape === "arrow") {
             const angle = Math.atan2(last.y - first.y, last.x - first.x);
-            const head = Math.max(8, lineWidth * 3);
+            const head = Math.max(8, context.lineWidth * 3);
             context.beginPath();
             context.moveTo(last.x, last.y);
             context.lineTo(last.x - head * Math.cos(angle - Math.PI / 6), last.y - head * Math.sin(angle - Math.PI / 6));
@@ -2409,13 +2443,21 @@
         context.beginPath();
         context.arc(first.x, first.y, Math.max(1.5, context.lineWidth / 2), 0, Math.PI * 2);
         context.fill();
+      } else if (points.length === 2) {
+        context.beginPath();
+        context.moveTo(first.x, first.y);
+        context.lineTo(last.x, last.y);
+        context.stroke();
       } else {
         context.beginPath();
-        points.forEach(function (point, index) {
-          const x = Number(point.x || 0) * width;
-          const y = Number(point.y || 0) * height;
-          if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
-        });
+        context.moveTo(first.x, first.y);
+        for (let i = 1; i < points.length - 1; i += 1) {
+          const p1 = { x: Number(points[i].x || 0) * width, y: Number(points[i].y || 0) * height };
+          const p2 = { x: Number(points[i + 1].x || 0) * width, y: Number(points[i + 1].y || 0) * height };
+          const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+          context.quadraticCurveTo(p1.x, p1.y, mid.x, mid.y);
+        }
+        context.lineTo(last.x, last.y);
         context.stroke();
       }
       context.restore();
