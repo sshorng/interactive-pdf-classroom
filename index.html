@@ -587,6 +587,7 @@
     const MAX_PDF_BYTES = 20 * 1024 * 1024;
     const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
     const INK_WIDTH_STEPS = [2, 4, 6, 8];
+    const INK_TAP_DISTANCE = 0.01;
     const GAS_URL = resolveGasUrl();
 
     if (window.pdfjsLib) {
@@ -1916,7 +1917,7 @@
       }
 
       scroll.addEventListener("touchstart", function (event) {
-        if (teacherInkActivePointerId !== null) return;
+        if (touchEventHasStylus(event) || teacherInkActivePointerId !== null) return;
         if (event.touches.length === 2) {
           isPinching = true;
           startTouch = null;
@@ -1937,7 +1938,7 @@
       }, { passive: false });
 
       scroll.addEventListener("touchmove", function (event) {
-        if (teacherInkActivePointerId !== null) return;
+        if (touchEventHasStylus(event) || teacherInkActivePointerId !== null) return;
         if (event.touches.length === 2 && isPinching && initialPinchDistance > 0) {
           event.preventDefault();
           const currDist = getPinchDist(event);
@@ -1958,6 +1959,7 @@
       }, { passive: false });
 
       scroll.addEventListener("touchend", function (event) {
+        if (touchEventHasStylus(event)) return;
         if (isPinching) {
           if (event.touches.length < 2) {
             isPinching = false;
@@ -2230,6 +2232,17 @@
       return type === "stylus" || type === "pen";
     }
 
+    function touchEventHasStylus(event) {
+      const lists = [event && event.changedTouches, event && event.touches];
+      for (let listIndex = 0; listIndex < lists.length; listIndex += 1) {
+        const touches = lists[listIndex];
+        for (let index = 0; touches && index < touches.length; index += 1) {
+          if (isStylusTouch(touches[index])) return true;
+        }
+      }
+      return false;
+    }
+
     function touchForPointerId(touches, pointerId, prefix) {
       if (typeof pointerId !== "string" || pointerId.indexOf(prefix) !== 0) return null;
       const identifier = pointerId.slice(prefix.length);
@@ -2252,6 +2265,32 @@
       };
       pointer.getCoalescedEvents = function () { return [pointer]; };
       return pointer;
+    }
+
+    function pointerSamples(event) {
+      if (!event) return [];
+      if (typeof event.getCoalescedEvents === "function") {
+        try {
+          const coalesced = event.getCoalescedEvents();
+          if (coalesced && coalesced.length) {
+            const samples = Array.from(coalesced);
+            if (samples[samples.length - 1] !== event) samples.push(event);
+            return samples;
+          }
+        } catch (error) {
+          // 部分瀏覽器可能在事件離開原始生命週期後拒絕讀取取樣。
+        }
+      }
+      return [event];
+    }
+
+    function releaseInkPointerCapture(canvas, pointerId) {
+      if (!canvas || pointerId === null || pointerId === undefined || typeof canvas.hasPointerCapture !== "function") return;
+      try {
+        if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+      } catch (error) {
+        // 指標已被瀏覽器回收時，不需要額外處理。
+      }
     }
 
     function beginTeacherInkTouch(event) {
@@ -2289,8 +2328,10 @@
       canvas.style.willChange = "transform";
       canvas.addEventListener("pointerdown", beginTeacherInk);
       canvas.addEventListener("pointermove", moveTeacherInk);
+      canvas.addEventListener("pointerrawupdate", moveTeacherInk);
       canvas.addEventListener("pointerup", finishTeacherInk);
       canvas.addEventListener("pointercancel", cancelTeacherInk);
+      canvas.addEventListener("lostpointercapture", cancelTeacherInk);
       canvas.addEventListener("touchstart", beginTeacherInkTouch, { passive: false });
       canvas.addEventListener("touchmove", moveTeacherInkTouch, { passive: false });
       canvas.addEventListener("touchend", finishTeacherInkTouch, { passive: false });
@@ -2374,14 +2415,15 @@
        const p0 = { x: previous.x * width, y: previous.y * height };
        const p1 = { x: control.x * width, y: control.y * height };
        const p2 = { x: current.x * width, y: current.y * height };
-       context.beginPath();
-       if (end === 1) {
-         context.moveTo(p0.x, p0.y);
-         context.lineTo((p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
-       } else {
-         context.moveTo((p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
-         context.quadraticCurveTo(p1.x, p1.y, (p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
-       }
+        context.beginPath();
+        if (end === 1) {
+          context.moveTo(p0.x, p0.y);
+          context.lineTo(p1.x, p1.y);
+        } else {
+          context.moveTo((p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
+          context.quadraticCurveTo(p1.x, p1.y, (p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
+          context.lineTo(p2.x, p2.y);
+        }
        context.stroke();
        context.restore();
      }
@@ -2406,14 +2448,14 @@
       if (!teacherInkActiveStroke && !teacherInkErasing) return;
       event.preventDefault();
       const canvas = document.getElementById("inkCanvas") || event.currentTarget;
-      const events = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
-      if (!events.length) return;
+      const events = pointerSamples(event);
       const lastPoint = canvasPoint(events[events.length - 1], canvas);
-      if (teacherInkStartPoint && Math.hypot(lastPoint.x - teacherInkStartPoint.x, lastPoint.y - teacherInkStartPoint.y) > 0.035) {
-        teacherInkMoved = true;
-      }
-       if (teacherInkErasing) {
-         events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, canvas)); });
+      if (teacherInkStartPoint) events.forEach(function (item) {
+        const point = canvasPoint(item, canvas);
+        if (Math.hypot(point.x - teacherInkStartPoint.x, point.y - teacherInkStartPoint.y) > INK_TAP_DISTANCE) teacherInkMoved = true;
+      });
+      if (teacherInkErasing) {
+        events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, canvas)); });
          return;
        }
        if (!teacherInkActiveStroke) return;
@@ -2426,15 +2468,29 @@
        scheduleTeacherInkPreview(canvas);
      }
 
-    function finishTeacherInk(event) {
+    function finishTeacherInk(event, cancelled) {
       if (event && event.pointerId !== teacherInkActivePointerId) return;
+      const pointerId = teacherInkActivePointerId;
+      const canvas = document.getElementById("inkCanvas") || (event && event.currentTarget);
+      const events = pointerSamples(event);
+      if (!cancelled && events.length && canvas && teacherInkStartPoint) events.forEach(function (item) {
+        const point = canvasPoint(item, canvas);
+        if (Math.hypot(point.x - teacherInkStartPoint.x, point.y - teacherInkStartPoint.y) > INK_TAP_DISTANCE) teacherInkMoved = true;
+      });
+      if (!cancelled && events.length && canvas && teacherInkErasing) events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, canvas)); });
+      if (!cancelled && events.length && canvas && teacherInkActiveStroke) {
+        const lastPoint = canvasPoint(events[events.length - 1], canvas);
+        if (teacherInkActiveStroke.tool === "shape") teacherInkActiveStroke.points = [teacherInkActiveStroke.points[0], lastPoint];
+        else appendCoalescedPoints(teacherInkActiveStroke, events, canvas);
+      }
       teacherInkActivePointerId = null;
+      releaseInkPointerCapture(canvas, pointerId);
       if (teacherInkPreviewFrame !== null) {
         cancelAnimationFrame(teacherInkPreviewFrame);
         teacherInkPreviewFrame = null;
       }
       const duration = performance.now() - teacherInkStartTime;
-      const isTap = !teacherInkMoved && duration < 240;
+      const isTap = !cancelled && !teacherInkMoved && duration < 240;
       const pt = teacherInkStartPoint || (teacherInkActiveStroke && teacherInkActiveStroke.points[0]) || { x: 0, y: 0 };
       const now = performance.now();
       if (isTap && event && event.pointerType === "pen") {
@@ -2474,9 +2530,12 @@
     function cancelTeacherInk(event) {
       if (event && event.pointerId !== teacherInkActivePointerId) return;
       if (teacherInkActiveStroke && teacherInkActiveStroke.points && teacherInkActiveStroke.points.length > 1) {
-        finishTeacherInk(event);
+        finishTeacherInk(event, true);
       } else {
+         const pointerId = teacherInkActivePointerId;
+         const canvas = document.getElementById("inkCanvas") || (event && event.currentTarget);
          teacherInkActivePointerId = null;
+         releaseInkPointerCapture(canvas, pointerId);
          if (teacherInkPreviewFrame !== null) {
            cancelAnimationFrame(teacherInkPreviewFrame);
            teacherInkPreviewFrame = null;
@@ -2538,6 +2597,7 @@
       if (teacherInkActiveStroke) strokes.push(teacherInkActiveStroke);
       canvas.classList.toggle("visible", teacherView && (strokes.length > 0 || state.view === "review" || state.view === "editor"));
       drawTeacherInkStrokes(canvas, strokes);
+      if (teacherInkActiveStroke) teacherInkRenderedPointCount = teacherInkActiveStroke.points.length;
     }
 
     function drawTeacherInkStrokes(canvas, strokes) {
@@ -3556,7 +3616,7 @@
       let isSwiping = false;
 
       element.addEventListener("touchstart", function (event) {
-        if (event.touches.length !== 1) return;
+        if (touchEventHasStylus(event) || event.touches.length !== 1) return;
         const target = event.target;
         if (target && (target.id === "reviewCanvas" || target.closest("textarea, input, select, button"))) return;
         startX = event.touches[0].clientX;
@@ -3565,6 +3625,7 @@
       }, { passive: true });
 
       element.addEventListener("touchend", function (event) {
+        if (touchEventHasStylus(event)) return;
         if (!isSwiping) return;
         isSwiping = false;
         const touch = event.changedTouches[0];
@@ -4073,6 +4134,22 @@
       const strokes = state.reviewStrokes.slice();
       if (reviewActiveStroke) strokes.push(reviewActiveStroke);
       drawTeacherInkStrokes(canvas, strokes);
+      if (reviewActiveStroke) reviewInkRenderedPointCount = reviewActiveStroke.points.length;
+    }
+
+    function scheduleReviewInkPreview(canvas) {
+      if (reviewInkPreviewFrame !== null) return;
+      reviewInkPreviewFrame = requestAnimationFrame(function () {
+        reviewInkPreviewFrame = null;
+        if (!reviewActiveStroke || !canvas || !canvas.isConnected) return;
+        const points = reviewActiveStroke.points || [];
+        if (reviewActiveStroke.tool === "pen") {
+          for (let index = Math.max(1, reviewInkRenderedPointCount); index < points.length; index += 1) drawLiveSegment(canvas, reviewActiveStroke, index);
+        } else {
+          drawReviewCanvas();
+        }
+        reviewInkRenderedPointCount = points.length;
+      });
     }
 
     function canvasPoint(event, canvas) {
@@ -4090,6 +4167,8 @@
     let reviewStartPoint = null;
     let reviewMoved = false;
     let lastReviewTipTap = null;
+    let reviewInkPreviewFrame = null;
+    let reviewInkRenderedPointCount = 0;
 
     function beginReviewInk(event) {
       const canvas = event.currentTarget || document.getElementById("reviewCanvas");
@@ -4106,6 +4185,11 @@
       reviewStartPoint = point;
       reviewMoved = false;
       reviewInkChanged = false;
+      reviewInkRenderedPointCount = 1;
+      if (reviewInkPreviewFrame !== null) {
+        cancelAnimationFrame(reviewInkPreviewFrame);
+        reviewInkPreviewFrame = null;
+      }
       if (state.reviewTool === "eraser") {
         reviewErasing = true;
         eraseReviewStrokeAt(point);
@@ -4120,12 +4204,12 @@
       if (!canvas || event.pointerId !== reviewActivePointerId) return;
       if (!reviewActiveStroke && !reviewErasing) return;
       event.preventDefault();
-      const events = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
-      if (!events.length) return;
+      const events = pointerSamples(event);
       const lastPoint = canvasPoint(events[events.length - 1], canvas);
-      if (reviewStartPoint && Math.hypot(lastPoint.x - reviewStartPoint.x, lastPoint.y - reviewStartPoint.y) > 0.035) {
-        reviewMoved = true;
-      }
+      if (reviewStartPoint) events.forEach(function (item) {
+        const point = canvasPoint(item, canvas);
+        if (Math.hypot(point.x - reviewStartPoint.x, point.y - reviewStartPoint.y) > INK_TAP_DISTANCE) reviewMoved = true;
+      });
       if (reviewErasing) {
         events.forEach(function (item) { eraseReviewStrokeAt(canvasPoint(item, canvas)); });
         return;
@@ -4133,15 +4217,11 @@
       if (!reviewActiveStroke) return;
       if (reviewActiveStroke.tool === "shape") {
         reviewActiveStroke.points = [reviewActiveStroke.points[0], lastPoint];
-        drawReviewCanvas();
+        scheduleReviewInkPreview(canvas);
         return;
       }
       appendCoalescedPoints(reviewActiveStroke, events, canvas);
-      if (reviewActiveStroke.tool === "pen") {
-        for (let index = 1; index < reviewActiveStroke.points.length; index += 1) drawLiveSegment(canvas, reviewActiveStroke, index);
-      } else {
-        drawReviewCanvas();
-      }
+      scheduleReviewInkPreview(canvas);
     }
 
     function beginReviewInkTouch(event) {
@@ -4178,8 +4258,10 @@
       canvas.style.willChange = "transform";
       canvas.addEventListener("pointerdown", beginReviewInk);
       canvas.addEventListener("pointermove", moveReviewInk);
+      canvas.addEventListener("pointerrawupdate", moveReviewInk);
       canvas.addEventListener("pointerup", finishReviewStroke);
       canvas.addEventListener("pointercancel", cancelReviewStroke);
+      canvas.addEventListener("lostpointercapture", cancelReviewStroke);
       canvas.addEventListener("touchstart", beginReviewInkTouch, { passive: false });
       canvas.addEventListener("touchmove", moveReviewInkTouch, { passive: false });
       canvas.addEventListener("touchend", finishReviewInkTouch, { passive: false });
@@ -4191,11 +4273,29 @@
       });
     }
 
-    function finishReviewStroke(event) {
+    function finishReviewStroke(event, cancelled) {
       if (event && event.pointerId !== reviewActivePointerId) return;
+      const pointerId = reviewActivePointerId;
+      const canvas = document.getElementById("reviewCanvas") || (event && event.currentTarget);
+      const events = pointerSamples(event);
+      if (!cancelled && events.length && canvas && reviewStartPoint) events.forEach(function (item) {
+        const point = canvasPoint(item, canvas);
+        if (Math.hypot(point.x - reviewStartPoint.x, point.y - reviewStartPoint.y) > INK_TAP_DISTANCE) reviewMoved = true;
+      });
+      if (!cancelled && events.length && canvas && reviewActiveStroke) {
+        const lastPoint = canvasPoint(events[events.length - 1], canvas);
+        if (reviewActiveStroke.tool === "shape") reviewActiveStroke.points = [reviewActiveStroke.points[0], lastPoint];
+        else appendCoalescedPoints(reviewActiveStroke, events, canvas);
+      }
+      if (!cancelled && events.length && canvas && reviewErasing) events.forEach(function (item) { eraseReviewStrokeAt(canvasPoint(item, canvas)); });
       reviewActivePointerId = null;
+      releaseInkPointerCapture(canvas, pointerId);
+      if (reviewInkPreviewFrame !== null) {
+        cancelAnimationFrame(reviewInkPreviewFrame);
+        reviewInkPreviewFrame = null;
+      }
       const duration = performance.now() - reviewStartTime;
-      const isTap = (!reviewMoved || (reviewActiveStroke && reviewActiveStroke.points.length <= 4)) && duration < 450;
+      const isTap = !cancelled && !reviewMoved && duration < 450;
       const pt = reviewStartPoint || (reviewActiveStroke && reviewActiveStroke.points[0]) || { x: 0, y: 0 };
       const now = performance.now();
       if (isTap && event && event.pointerType === "pen") {
@@ -4229,10 +4329,17 @@
     function cancelReviewStroke(event) {
       if (event && event.pointerId !== reviewActivePointerId) return;
       if (reviewActiveStroke && reviewActiveStroke.points && reviewActiveStroke.points.length > 1) {
-        finishReviewStroke(event);
+        finishReviewStroke(event, true);
       } else {
-        reviewActivePointerId = null;
-        reviewActiveStroke = null;
+        const pointerId = reviewActivePointerId;
+        const canvas = document.getElementById("reviewCanvas") || (event && event.currentTarget);
+         reviewActivePointerId = null;
+         releaseInkPointerCapture(canvas, pointerId);
+         if (reviewInkPreviewFrame !== null) {
+           cancelAnimationFrame(reviewInkPreviewFrame);
+           reviewInkPreviewFrame = null;
+         }
+         reviewActiveStroke = null;
         reviewErasing = false;
         reviewInkChanged = false;
         drawReviewCanvas();
