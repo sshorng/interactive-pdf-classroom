@@ -623,7 +623,7 @@
       previousInkTool: "pen",
       inkShape: "arrow",
       inkColor: "#c47f78",
-      inkWidth: 4,
+      inkWidth: 2,
       inkSaveTimer: null,
       classroomStateTimer: null,
       submissions: [],
@@ -634,7 +634,7 @@
       reviewStrokes: [],
       reviewComment: "",
       reviewColor: "#d34f42",
-      reviewWidth: 4,
+      reviewWidth: 2,
       reviewTool: "pen",
       previousReviewTool: "pen",
       reviewShape: "arrow",
@@ -1888,7 +1888,7 @@
         const controls = document.createElement("div");
         controls.id = "inkControls";
         controls.className = "ink-controls";
-        controls.innerHTML = "<button class=\"ink-icon-button active\" data-ink-tool=\"pen\" type=\"button\" title=\"手寫筆\" aria-label=\"手寫筆\">✎</button><button class=\"ink-icon-button\" data-ink-tool=\"highlighter\" type=\"button\" title=\"螢光筆\" aria-label=\"螢光筆\">▰</button><button class=\"ink-icon-button\" data-ink-tool=\"shape\" type=\"button\" title=\"圖形\" aria-label=\"圖形\">◇</button><span class=\"ink-shape-buttons\" id=\"inkShapeButtons\" hidden><button class=\"ink-icon-button\" data-ink-shape=\"arrow\" type=\"button\" title=\"箭頭\" aria-label=\"箭頭\">➜</button><button class=\"ink-icon-button\" data-ink-shape=\"line\" type=\"button\" title=\"直線\" aria-label=\"直線\">╱</button><button class=\"ink-icon-button\" data-ink-shape=\"rect\" type=\"button\" title=\"矩形\" aria-label=\"矩形\">□</button><button class=\"ink-icon-button\" data-ink-shape=\"circle\" type=\"button\" title=\"圓形\" aria-label=\"圓形\">○</button></span><button class=\"ink-icon-button\" data-ink-tool=\"eraser\" type=\"button\" title=\"橡皮擦\" aria-label=\"橡皮擦\">⌫</button><span class=\"ink-palette\" aria-label=\"常用顏色\"><button class=\"ink-swatch active\" data-ink-color=\"#c47f78\" style=\"background:#c47f78\" type=\"button\" title=\"豆沙玫瑰\" aria-label=\"豆沙玫瑰\"></button><button class=\"ink-swatch\" data-ink-color=\"#9eaaa0\" style=\"background:#9eaaa0\" type=\"button\" title=\"鼠尾草綠\" aria-label=\"鼠尾草綠\"></button><button class=\"ink-swatch\" data-ink-color=\"#91a6b5\" style=\"background:#91a6b5\" type=\"button\" title=\"霧藍\" aria-label=\"霧藍\"></button><button class=\"ink-swatch\" data-ink-color=\"#a99db8\" style=\"background:#a99db8\" type=\"button\" title=\"灰紫\" aria-label=\"灰紫\"></button><button class=\"ink-swatch\" data-ink-color=\"#c1a477\" style=\"background:#c1a477\" type=\"button\" title=\"奶茶棕\" aria-label=\"奶茶棕\"></button></span><input id=\"inkColorField\" class=\"ink-custom-color\" type=\"color\" value=\"#c47f78\" title=\"自訂顏色\" aria-label=\"自訂顏色\"><span class=\"ink-width-selector\" id=\"inkWidthSelector\" aria-label=\"筆畫粗細\"><button class=\"ink-width-btn\" data-ink-width=\"2\" type=\"button\" title=\"細 (2px)\" aria-label=\"細 2px\">2</button><button class=\"ink-width-btn active\" data-ink-width=\"4\" type=\"button\" title=\"適中 (4px)\" aria-label=\"適中 4px\">4</button><button class=\"ink-width-btn\" data-ink-width=\"6\" type=\"button\" title=\"粗 (6px)\" aria-label=\"粗 6px\">6</button><button class=\"ink-width-btn\" data-ink-width=\"8\" type=\"button\" title=\"特粗 (8px)\" aria-label=\"特粗 8px\">8</button></span><button class=\"ink-icon-button\" id=\"undoTeacherInkButton\" type=\"button\" title=\"復原一筆\" aria-label=\"復原一筆\">↶</button><button class=\"ink-icon-button danger\" id=\"clearTeacherInkButton\" type=\"button\" title=\"清除本頁手寫\" aria-label=\"清除本頁手寫\">⌫</button><button class=\"ink-icon-button danger\" id=\"clearAllTeacherInkButton\" type=\"button\" title=\"全部清除\" aria-label=\"全部清除\">⊗</button><span class=\"ink-status\" id=\"inkStatus\">手寫模式中（支援 Apple Pencil、觸控筆與手繪）</span>";
+        controls.innerHTML = "<button class=\"ink-icon-button active\" data-ink-tool=\"pen\" type=\"button\" title=\"手寫筆\" aria-label=\"手寫筆\">✎</button><button class=\"ink-icon-button\" data-ink-tool=\"highlighter\" type=\"button\" title=\"螢光筆\" aria-label=\"螢光筆\">▰</button><button class=\"ink-icon-button\" data-ink-tool=\"shape\" type=\"button\" title=\"圖形\" aria-label=\"圖形\">◇</button><span class=\"ink-shape-buttons\" id=\"inkShapeButtons\" hidden><button class=\"ink-icon-button\" data-ink-shape=\"arrow\" type=\"button\" title=\"箭頭\" aria-label=\"箭頭\">➜</button><button class=\"ink-icon-button\" data-ink-shape=\"line\" type=\"button\" title=\"直線\" aria-label=\"直線\">╱</button><button class=\"ink-icon-button\" data-ink-shape=\"rect\" type=\"button\" title=\"矩形\" aria-label=\"矩形\">□</button><button class=\"ink-icon-button\" data-ink-shape=\"circle\" type=\"button\" title=\"圓形\" aria-label=\"圓形\">○</button></span><button class=\"ink-icon-button\" data-ink-tool=\"eraser\" type=\"button\" title=\"橡皮擦\" aria-label=\"橡皮擦\">⌫</button><span class=\"ink-palette\" aria-label=\"常用顏色\"><button class=\"ink-swatch active\" data-ink-color=\"#c47f78\" style=\"background:#c47f78\" type=\"button\" title=\"豆沙玫瑰\" aria-label=\"豆沙玫瑰\"></button><button class=\"ink-swatch\" data-ink-color=\"#9eaaa0\" style=\"background:#9eaaa0\" type=\"button\" title=\"鼠尾草綠\" aria-label=\"鼠尾草綠\"></button><button class=\"ink-swatch\" data-ink-color=\"#91a6b5\" style=\"background:#91a6b5\" type=\"button\" title=\"霧藍\" aria-label=\"霧藍\"></button><button class=\"ink-swatch\" data-ink-color=\"#a99db8\" style=\"background:#a99db8\" type=\"button\" title=\"灰紫\" aria-label=\"灰紫\"></button><button class=\"ink-swatch\" data-ink-color=\"#c1a477\" style=\"background:#c1a477\" type=\"button\" title=\"奶茶棕\" aria-label=\"奶茶棕\"></button></span><input id=\"inkColorField\" class=\"ink-custom-color\" type=\"color\" value=\"#c47f78\" title=\"自訂顏色\" aria-label=\"自訂顏色\"><span class=\"ink-width-selector\" id=\"inkWidthSelector\" aria-label=\"筆畫粗細\"><button class=\"ink-width-btn active\" data-ink-width=\"2\" type=\"button\" title=\"細 (2px)\" aria-label=\"細 2px\">2</button><button class=\"ink-width-btn\" data-ink-width=\"4\" type=\"button\" title=\"適中 (4px)\" aria-label=\"適中 4px\">4</button><button class=\"ink-width-btn\" data-ink-width=\"6\" type=\"button\" title=\"粗 (6px)\" aria-label=\"粗 6px\">6</button><button class=\"ink-width-btn\" data-ink-width=\"8\" type=\"button\" title=\"特粗 (8px)\" aria-label=\"特粗 8px\">8</button></span><button class=\"ink-icon-button\" id=\"undoTeacherInkButton\" type=\"button\" title=\"復原一筆\" aria-label=\"復原一筆\">↶</button><button class=\"ink-icon-button danger\" id=\"clearTeacherInkButton\" type=\"button\" title=\"清除本頁手寫\" aria-label=\"清除本頁手寫\">⌫</button><button class=\"ink-icon-button danger\" id=\"clearAllTeacherInkButton\" type=\"button\" title=\"全部清除\" aria-label=\"全部清除\">⊗</button><span class=\"ink-status\" id=\"inkStatus\">手寫模式中（支援 Apple Pencil、觸控筆與手繪）</span>";
         toolbar.appendChild(controls);
         bindInkControls();
       }
@@ -2392,21 +2392,16 @@
     function finishTeacherInk(event) {
       if (event && event.pointerId !== teacherInkActivePointerId) return;
       teacherInkActivePointerId = null;
-      if (teacherInkErasing) {
-        teacherInkErasing = false;
-        if (teacherInkChanged) scheduleTeacherInkSave();
-        teacherInkChanged = false;
-        return;
-      }
-      if (!teacherInkActiveStroke) return;
       const duration = performance.now() - teacherInkStartTime;
       const isTap = !teacherInkMoved && duration < 240;
-      const pt = teacherInkStartPoint || teacherInkActiveStroke.points[0];
+      const pt = teacherInkStartPoint || (teacherInkActiveStroke && teacherInkActiveStroke.points[0]) || { x: 0, y: 0 };
       const now = performance.now();
       if (isTap && (event && (event.pointerType === "pen" || event.pointerType === "touch"))) {
         if (lastTeacherTipTap && (now - lastTeacherTipTap.time < 380) && Math.hypot(pt.x - lastTeacherTipTap.x, pt.y - lastTeacherTipTap.y) < 0.04) {
           lastTeacherTipTap = null;
           teacherInkActiveStroke = null;
+          teacherInkErasing = false;
+          teacherInkChanged = false;
           const strokes = teacherInkForPage(state.currentPage).slice();
           if (strokes.length > 0 && strokes[strokes.length - 1].points.length <= 2) strokes.pop();
           state.teacherInk.set(Number(state.currentPage), strokes);
@@ -2419,6 +2414,13 @@
       } else {
         lastTeacherTipTap = null;
       }
+      if (teacherInkErasing) {
+        teacherInkErasing = false;
+        if (teacherInkChanged) scheduleTeacherInkSave();
+        teacherInkChanged = false;
+        return;
+      }
+      if (!teacherInkActiveStroke) return;
       const strokes = teacherInkForPage(state.currentPage).slice();
       strokes.push(teacherInkActiveStroke);
       state.teacherInk.set(Number(state.currentPage), strokes);
@@ -3966,20 +3968,16 @@
     function finishReviewStroke(event) {
       if (event && event.pointerId !== reviewActivePointerId) return;
       reviewActivePointerId = null;
-      if (reviewErasing) {
-        reviewErasing = false;
-        reviewInkChanged = false;
-        return;
-      }
-      if (!reviewActiveStroke) return;
       const duration = performance.now() - reviewStartTime;
       const isTap = !reviewMoved && duration < 240;
-      const pt = reviewStartPoint || reviewActiveStroke.points[0];
+      const pt = reviewStartPoint || (reviewActiveStroke && reviewActiveStroke.points[0]) || { x: 0, y: 0 };
       const now = performance.now();
       if (isTap && (event && (event.pointerType === "pen" || event.pointerType === "touch"))) {
         if (lastReviewTipTap && (now - lastReviewTipTap.time < 380) && Math.hypot(pt.x - lastReviewTipTap.x, pt.y - lastReviewTipTap.y) < 0.04) {
           lastReviewTipTap = null;
           reviewActiveStroke = null;
+          reviewErasing = false;
+          reviewInkChanged = false;
           if (state.reviewStrokes.length > 0 && state.reviewStrokes[state.reviewStrokes.length - 1].points.length <= 2) {
             state.reviewStrokes.pop();
           }
@@ -3991,6 +3989,12 @@
       } else {
         lastReviewTipTap = null;
       }
+      if (reviewErasing) {
+        reviewErasing = false;
+        reviewInkChanged = false;
+        return;
+      }
+      if (!reviewActiveStroke) return;
       state.reviewStrokes.push(reviewActiveStroke);
       reviewActiveStroke = null;
       drawReviewCanvas();
