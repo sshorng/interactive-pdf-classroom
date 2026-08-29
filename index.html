@@ -2263,12 +2263,10 @@
         if (state.inkTool !== "eraser") {
           state.previousInkTool = state.inkTool || "pen";
           state.inkTool = "eraser";
-          setInkStatus("Apple Pencil 切換為橡皮擦");
           showToast("已切換為橡皮擦。", "info");
         } else {
           state.inkTool = state.previousInkTool || "pen";
           const label = state.inkTool === "highlighter" ? "螢光筆" : (state.inkTool === "shape" ? "圖形" : "手寫筆");
-          setInkStatus("Apple Pencil 切換回" + label);
           showToast("已切換回" + label + "。", "info");
         }
         updateInkControls();
@@ -2294,6 +2292,11 @@
       canvas.addEventListener("pointermove", moveTeacherInk);
       canvas.addEventListener("pointerup", finishTeacherInk);
       canvas.addEventListener("pointercancel", cancelTeacherInk);
+      canvas.addEventListener("dblclick", function (event) {
+        if (event.pointerType === "pen") {
+          togglePencilEraser();
+        }
+      });
     }
 
     function beginTeacherInk(event) {
@@ -2308,7 +2311,6 @@
       }
       if (!isDrawing && isPen) {
         setTeacherInkMode(true);
-        setInkStatus("Apple Pencil 自動啟用手寫");
       }
       event.preventDefault();
       teacherInkActivePointerId = event.pointerId;
@@ -2375,7 +2377,7 @@
       const events = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
       if (!events.length) return;
       const lastPoint = canvasPoint(events[events.length - 1], canvas);
-      if (teacherInkStartPoint && Math.hypot(lastPoint.x - teacherInkStartPoint.x, lastPoint.y - teacherInkStartPoint.y) > 0.008) {
+      if (teacherInkStartPoint && Math.hypot(lastPoint.x - teacherInkStartPoint.x, lastPoint.y - teacherInkStartPoint.y) > 0.035) {
         teacherInkMoved = true;
       }
       if (teacherInkErasing) {
@@ -4072,7 +4074,7 @@
         const events = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
         if (!events.length) return;
         const lastPoint = canvasPoint(events[events.length - 1], canvas);
-        if (reviewStartPoint && Math.hypot(lastPoint.x - reviewStartPoint.x, lastPoint.y - reviewStartPoint.y) > 0.008) {
+        if (reviewStartPoint && Math.hypot(lastPoint.x - reviewStartPoint.x, lastPoint.y - reviewStartPoint.y) > 0.035) {
           reviewMoved = true;
         }
         if (reviewErasing) {
@@ -4097,22 +4099,27 @@
       });
       canvas.addEventListener("pointerup", finishReviewStroke);
       canvas.addEventListener("pointercancel", cancelReviewStroke);
+      canvas.addEventListener("dblclick", function (event) {
+        if (event.pointerType === "pen") {
+          togglePencilEraser();
+        }
+      });
     }
 
     function finishReviewStroke(event) {
       if (event && event.pointerId !== reviewActivePointerId) return;
       reviewActivePointerId = null;
       const duration = performance.now() - reviewStartTime;
-      const isTap = !reviewMoved && duration < 240;
+      const isTap = (!reviewMoved || (reviewActiveStroke && reviewActiveStroke.points.length <= 4)) && duration < 450;
       const pt = reviewStartPoint || (reviewActiveStroke && reviewActiveStroke.points[0]) || { x: 0, y: 0 };
       const now = performance.now();
       if (isTap && event && event.pointerType === "pen") {
-        if (lastReviewTipTap && (now - lastReviewTipTap.time < 380) && Math.hypot(pt.x - lastReviewTipTap.x, pt.y - lastReviewTipTap.y) < 0.04) {
+        if (lastReviewTipTap && (now - lastReviewTipTap.time < 550) && Math.hypot(pt.x - lastReviewTipTap.x, pt.y - lastReviewTipTap.y) < 0.12) {
           lastReviewTipTap = null;
           reviewActiveStroke = null;
           reviewErasing = false;
           reviewInkChanged = false;
-          if (state.reviewStrokes.length > 0 && state.reviewStrokes[state.reviewStrokes.length - 1].points.length <= 2) {
+          if (state.reviewStrokes.length > 0 && state.reviewStrokes[state.reviewStrokes.length - 1].points.length <= 4) {
             state.reviewStrokes.pop();
           }
           drawReviewCanvas();
