@@ -3073,7 +3073,10 @@
       if (!scroll || !zone) return;
       const scrollRect = scroll.getBoundingClientRect();
       const zoneRect = zone.getBoundingClientRect();
-      scroll.scrollBy({ left: zoneRect.left - scrollRect.left - scroll.clientWidth / 2 + zoneRect.width / 2, top: zoneRect.top - scrollRect.top - scroll.clientHeight / 2 + zoneRect.height / 2, behavior: "smooth" });
+      const deltaY = zoneRect.top - scrollRect.top - (scroll.clientHeight / 2) + (zoneRect.height / 2);
+      if (Math.abs(deltaY) > 20) {
+        scroll.scrollBy({ top: deltaY, behavior: "smooth" });
+      }
     }
 
     async function openStudentAnswerPanel(areaId) {
