@@ -429,8 +429,8 @@
     .modal-close:hover { color: var(--danger); background: #fff3ef; border-color: #e9c6bd; }
     .modal-card form { margin-top: 14px; }
     .share-url { overflow-wrap: anywhere; margin-top: 9px; padding: 10px; color: var(--teal-dark); background: #f1f6f2; border-radius: 10px; font-size: 12px; }
-    .qr-wrap { display: grid; place-items: center; margin-top: 13px; }
-    .qr-wrap img { width: 190px; height: 190px; padding: 8px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+    .qr-wrap { display: grid; place-items: center; margin-top: 10px; }
+    .qr-wrap img { width: 290px; height: 290px; max-width: 80vw; max-height: 80vw; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-soft); }
     .modal-tip { margin-top: 10px; color: var(--muted); font-size: 12px; }
     .toast-stack { position: fixed; right: 20px; bottom: 20px; z-index: 1200; display: grid; gap: 8px; width: min(360px, calc(100vw - 40px)); }
     .toast { padding: 12px 14px; color: var(--teal-dark); background: #f1f8f2; border: 1px solid #c9e0cf; border-radius: 12px; box-shadow: var(--shadow-soft); animation: toastIn .2s ease; font-size: 13px; }
@@ -837,6 +837,7 @@
     function makeBoardUrl(boardId) {
       const url = new URL(window.location.href);
       url.search = "";
+      url.searchParams.set("view", "student");
       url.searchParams.set("board", boardId);
       if (GAS_URL) url.searchParams.set("config", btoa(GAS_URL));
       return url.toString();
@@ -845,7 +846,7 @@
     function openShareModal(board) {
       const link = makeBoardUrl(board.id);
       const localOnly = state.demo || !GAS_URL;
-      openFormModal("分享教材版面", "<form><p class=\"modal-tip\">" + (localOnly ? "目前是本機示範模式，這個網址只能在目前裝置使用。" : "學生開啟這個網址後會直接進入本版面。") + "</p><div class=\"share-url\">" + escapeHtml(link) + "</div><div class=\"qr-wrap\"><img src=\"https://quickchart.io/qr?text=" + encodeURIComponent(link) + "&size=240\" alt=\"教材版面 QR Code\"></div></form>", "複製網址", async function () {
+      openFormModal("學生連線 QR Code", "<form><p class=\"modal-tip\" style=\"text-align:center;margin-top:0;\">" + (localOnly ? "目前為本機示範模式，請用目前裝置測試。" : "請學生以手機或平板掃描 QR Code 進入作答區。") + "</p><div class=\"qr-wrap\"><img src=\"https://quickchart.io/qr?text=" + encodeURIComponent(link) + "&size=360\" alt=\"學生作答 QR Code\"></div></form>", "複製作答網址", async function () {
         await copyText(link);
         return true;
       });
@@ -1535,7 +1536,7 @@
       }
       grid.innerHTML = state.boards.map(function (board, index) {
         const letter = String(index + 1).padStart(2, "0");
-        return "<article class=\"board-card\"><div class=\"board-card-top\"><div class=\"board-mark\">" + letter + "</div><button class=\"icon-button\" data-share-board=\"" + escapeHtml(board.id) + "\" type=\"button\" title=\"分享版面\">⌁</button></div><h3>" + escapeHtml(board.name) + "</h3><p>" + escapeHtml(board.description || "尚未寫入版面說明。") + "</p><div class=\"board-meta\"><span class=\"meta-chip\">" + escapeHtml(board.pdfFileName || "尚未上傳 PDF") + "</span><span class=\"meta-chip\">更新於 " + escapeHtml(formatTime(board.updatedAt)) + "</span></div><div class=\"board-actions\"><button class=\"button small teal\" data-edit-board=\"" + escapeHtml(board.id) + "\" type=\"button\">設定教材</button><button class=\"button small\" data-review-board=\"" + escapeHtml(board.id) + "\" type=\"button\">批改作答</button><button class=\"button small subtle\" data-student-board=\"" + escapeHtml(board.id) + "\" type=\"button\">學生頁</button></div></article>";
+        return "<article class=\"board-card\"><div class=\"board-card-top\"><div class=\"board-mark\">" + letter + "</div><button class=\"icon-button\" data-share-board=\"" + escapeHtml(board.id) + "\" type=\"button\" title=\"分享學生 QR Code\" style=\"font-size:16px;\">📱</button></div><h3>" + escapeHtml(board.name) + "</h3><p>" + escapeHtml(board.description || "尚未寫入版面說明。") + "</p><div class=\"board-meta\"><span class=\"meta-chip\">" + escapeHtml(board.pdfFileName || "尚未上傳 PDF") + "</span><span class=\"meta-chip\">更新於 " + escapeHtml(formatTime(board.updatedAt)) + "</span></div><div class=\"board-actions\"><button class=\"button small teal\" data-edit-board=\"" + escapeHtml(board.id) + "\" type=\"button\">設定教材</button><button class=\"button small\" data-review-board=\"" + escapeHtml(board.id) + "\" type=\"button\">批改作答</button><button class=\"button small subtle\" data-student-board=\"" + escapeHtml(board.id) + "\" type=\"button\">學生頁</button></div></article>";
       }).join("");
       grid.querySelectorAll("[data-edit-board]").forEach(function (button) { button.addEventListener("click", function () { goView("editor", button.dataset.editBoard); }); });
        grid.querySelectorAll("[data-review-board]").forEach(function (button) { button.textContent = "進入課堂區"; button.addEventListener("click", function () { goView("review", button.dataset.reviewBoard); }); });
@@ -3002,7 +3003,7 @@
         share.className = "button-share";
         share.type = "button";
         share.title = "開啟學生連線 QR Code";
-        share.textContent = "⌁ 學生連線";
+        share.textContent = "📱 學生連線";
         title.appendChild(back);
         title.appendChild(name);
         title.appendChild(share);
