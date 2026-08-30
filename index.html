@@ -2214,6 +2214,15 @@
     let teacherInkPreviewFrame = null;
     let teacherInkRenderedPointCount = 0;
 
+    // ── Stroke continuation（仿 GoodNotes 防斷筆）──
+    // 筆稍微提起再落下時，若時空距離夠近就自動續接同一筆劃
+    const STROKE_MERGE_MS = 120;        // 提筆後多久內落筆可續接（毫秒）
+    const STROKE_MERGE_DIST = 0.035;    // 正規化座標距離門檻
+    let teacherInkPendingStroke = null;  // 等待續接的暫存筆劃
+    let teacherInkMergeTimer = null;     // 續接逾時計時器
+    let teacherInkLastEndPoint = null;   // 上一筆最後一個點
+    let teacherInkLastEndTime = 0;       // 上一筆結束時間戳
+
     function isStylusTouch(touch) {
       const type = String(touch && touch.touchType || "").toLowerCase();
       return type === "stylus" || type === "pen";
@@ -2328,6 +2337,20 @@
       canvas.addEventListener("touchcancel", cancelTeacherInkTouch, { passive: false });
     }
 
+    function commitPendingTeacherStroke() {
+      if (teacherInkMergeTimer !== null) {
+        clearTimeout(teacherInkMergeTimer);
+        teacherInkMergeTimer = null;
+      }
+      if (!teacherInkPendingStroke) return;
+      const strokes = teacherInkForPage(state.currentPage).slice();
+      strokes.push(teacherInkPendingStroke);
+      state.teacherInk.set(Number(state.currentPage), strokes);
+      teacherInkPendingStroke = null;
+      renderTeacherInk();
+      scheduleTeacherInkSave();
+    }
+
     function beginTeacherInk(event) {
       if (!state.pdf) return;
       if (event.pointerType === "touch") return;
@@ -2344,16 +2367,41 @@
       }
       const point = canvasPoint(event, canvas);
       teacherInkChanged = false;
-      teacherInkRenderedPointCount = 1;
       if (teacherInkPreviewFrame !== null) {
         cancelAnimationFrame(teacherInkPreviewFrame);
         teacherInkPreviewFrame = null;
       }
       if (state.inkTool === "eraser") {
+        commitPendingTeacherStroke();
         teacherInkErasing = true;
         eraseTeacherInkAt(point);
         return;
       }
+      // ── 續接判定：若在短時間內、靠近上一筆末端，就續接而非新起一筆 ──
+      const now = Date.now();
+      if (
+        teacherInkPendingStroke &&
+        teacherInkLastEndPoint &&
+        (now - teacherInkLastEndTime) < STROKE_MERGE_MS &&
+        Math.hypot(point.x - teacherInkLastEndPoint.x, point.y - teacherInkLastEndPoint.y) < STROKE_MERGE_DIST &&
+        teacherInkPendingStroke.tool === state.inkTool &&
+        teacherInkPendingStroke.color === state.inkColor
+      ) {
+        // 取消逾時，把暫存筆劃接回 active 繼續畫
+        if (teacherInkMergeTimer !== null) {
+          clearTimeout(teacherInkMergeTimer);
+          teacherInkMergeTimer = null;
+        }
+        teacherInkActiveStroke = teacherInkPendingStroke;
+        teacherInkPendingStroke = null;
+        teacherInkActiveStroke.points.push(point);
+        teacherInkRenderedPointCount = teacherInkActiveStroke.points.length;
+        renderTeacherInk();
+        return;
+      }
+      // 若有暫存但不符合續接條件，先送出再開新筆
+      commitPendingTeacherStroke();
+      teacherInkRenderedPointCount = 1;
       teacherInkActiveStroke = { tool: state.inkTool, shape: state.inkShape, color: state.inkColor, width: state.inkWidth / 800, points: [point] };
       renderTeacherInk();
     }
@@ -2473,12 +2521,26 @@
         return;
       }
       if (!teacherInkActiveStroke) return;
-      const strokes = teacherInkForPage(state.currentPage).slice();
-      strokes.push(teacherInkActiveStroke);
-      state.teacherInk.set(Number(state.currentPage), strokes);
+      // 圖形與螢光筆不做續接，直接送出
+      if (teacherInkActiveStroke.tool === "shape" || teacherInkActiveStroke.tool === "highlighter") {
+        commitPendingTeacherStroke();
+        const strokes = teacherInkForPage(state.currentPage).slice();
+        strokes.push(teacherInkActiveStroke);
+        state.teacherInk.set(Number(state.currentPage), strokes);
+        teacherInkActiveStroke = null;
+        renderTeacherInk();
+        scheduleTeacherInkSave();
+        return;
+      }
+      // 手寫筆：暫存等待續接（先送出前一筆暫存）
+      commitPendingTeacherStroke();
+      const lastPts = teacherInkActiveStroke.points;
+      teacherInkLastEndPoint = lastPts.length ? lastPts[lastPts.length - 1] : null;
+      teacherInkLastEndTime = Date.now();
+      teacherInkPendingStroke = teacherInkActiveStroke;
       teacherInkActiveStroke = null;
-      renderTeacherInk();
-      scheduleTeacherInkSave();
+      // 暫存逾時後自動送出
+      teacherInkMergeTimer = setTimeout(commitPendingTeacherStroke, STROKE_MERGE_MS);
     }
 
     function cancelTeacherInk(event) {
@@ -2548,6 +2610,7 @@
       }
       const teacherView = state.view === "editor" || state.view === "review" || state.view === "student";
       const strokes = teacherInkForPage(state.currentPage).slice();
+      if (teacherInkPendingStroke) strokes.push(teacherInkPendingStroke);
       if (teacherInkActiveStroke) strokes.push(teacherInkActiveStroke);
       canvas.classList.toggle("visible", teacherView && (strokes.length > 0 || state.view === "review" || state.view === "editor"));
       drawTeacherInkStrokes(canvas, strokes);
@@ -3015,6 +3078,7 @@
 
     function changePage(delta) {
       if (!state.pdf) return;
+      commitPendingTeacherStroke();
       state.currentPage = clamp(state.currentPage + delta, 1, state.pdf.numPages);
       renderPdfPage();
       scheduleClassroomStateSave();
@@ -3945,6 +4009,7 @@
       }
 
       stage.addEventListener("touchstart", function (event) {
+        if (touchEventHasStylus(event)) return;
         if (reviewActivePointerId !== null) return;
         if (event.touches.length === 2) {
           isReviewPinching = true;
@@ -3966,6 +4031,7 @@
       }, { passive: false });
 
       stage.addEventListener("touchmove", function (event) {
+        if (touchEventHasStylus(event)) return;
         if (reviewActivePointerId !== null) return;
         if (event.touches.length === 2 && isReviewPinching && initialPinchDistance > 0) {
           event.preventDefault();
@@ -3991,6 +4057,7 @@
       }, { passive: false });
 
       stage.addEventListener("touchend", function (event) {
+        if (touchEventHasStylus(event)) return;
         if (reviewActivePointerId !== null) return;
         if (isReviewPinching) {
           if (event.touches.length < 2) {
@@ -4023,7 +4090,8 @@
         }
       }, { passive: false });
 
-      stage.addEventListener("touchcancel", function () {
+      stage.addEventListener("touchcancel", function (event) {
+        if (touchEventHasStylus(event)) return;
         if (isReviewPinching) {
           isReviewPinching = false;
           const wrap = stage.querySelector(".review-image-wrap");
@@ -4086,6 +4154,7 @@
       const canvas = document.getElementById("reviewCanvas");
       if (!canvas) return;
       const strokes = state.reviewStrokes.slice();
+      if (reviewPendingStroke) strokes.push(reviewPendingStroke);
       if (reviewActiveStroke) strokes.push(reviewActiveStroke);
       drawTeacherInkStrokes(canvas, strokes);
       if (reviewActiveStroke) reviewInkRenderedPointCount = reviewActiveStroke.points.length;
@@ -4120,6 +4189,23 @@
     let reviewInkPreviewFrame = null;
     let reviewInkRenderedPointCount = 0;
 
+    // ── Review 側續接防斷筆 ──
+    let reviewPendingStroke = null;
+    let reviewMergeTimer = null;
+    let reviewLastEndPoint = null;
+    let reviewLastEndTime = 0;
+
+    function commitPendingReviewStroke() {
+      if (reviewMergeTimer !== null) {
+        clearTimeout(reviewMergeTimer);
+        reviewMergeTimer = null;
+      }
+      if (!reviewPendingStroke) return;
+      state.reviewStrokes.push(reviewPendingStroke);
+      reviewPendingStroke = null;
+      drawReviewCanvas();
+    }
+
     function beginReviewInk(event) {
       const canvas = event.currentTarget || document.getElementById("reviewCanvas");
       if (!canvas || isReviewPinching) return;
@@ -4136,16 +4222,39 @@
       }
       const point = canvasPoint(event, canvas);
       reviewInkChanged = false;
-      reviewInkRenderedPointCount = 1;
       if (reviewInkPreviewFrame !== null) {
         cancelAnimationFrame(reviewInkPreviewFrame);
         reviewInkPreviewFrame = null;
       }
       if (state.reviewTool === "eraser") {
+        commitPendingReviewStroke();
         reviewErasing = true;
         eraseReviewStrokeAt(point);
         return;
       }
+      // ── 續接判定 ──
+      const now = Date.now();
+      if (
+        reviewPendingStroke &&
+        reviewLastEndPoint &&
+        (now - reviewLastEndTime) < STROKE_MERGE_MS &&
+        Math.hypot(point.x - reviewLastEndPoint.x, point.y - reviewLastEndPoint.y) < STROKE_MERGE_DIST &&
+        reviewPendingStroke.tool === state.reviewTool &&
+        reviewPendingStroke.color === state.reviewColor
+      ) {
+        if (reviewMergeTimer !== null) {
+          clearTimeout(reviewMergeTimer);
+          reviewMergeTimer = null;
+        }
+        reviewActiveStroke = reviewPendingStroke;
+        reviewPendingStroke = null;
+        reviewActiveStroke.points.push(point);
+        reviewInkRenderedPointCount = reviewActiveStroke.points.length;
+        drawReviewCanvas();
+        return;
+      }
+      commitPendingReviewStroke();
+      reviewInkRenderedPointCount = 1;
       reviewActiveStroke = { tool: state.reviewTool, shape: state.reviewShape, color: state.reviewColor, width: state.reviewWidth / 800, points: [point] };
       drawReviewCanvas();
     }
@@ -4242,9 +4351,22 @@
         return;
       }
       if (!reviewActiveStroke) return;
-      state.reviewStrokes.push(reviewActiveStroke);
+      // 圖形與螢光筆不做續接，直接送出
+      if (reviewActiveStroke.tool === "shape" || reviewActiveStroke.tool === "highlighter") {
+        commitPendingReviewStroke();
+        state.reviewStrokes.push(reviewActiveStroke);
+        reviewActiveStroke = null;
+        drawReviewCanvas();
+        return;
+      }
+      // 手寫筆：暫存等待續接
+      commitPendingReviewStroke();
+      const lastPts = reviewActiveStroke.points;
+      reviewLastEndPoint = lastPts.length ? lastPts[lastPts.length - 1] : null;
+      reviewLastEndTime = Date.now();
+      reviewPendingStroke = reviewActiveStroke;
       reviewActiveStroke = null;
-      drawReviewCanvas();
+      reviewMergeTimer = setTimeout(commitPendingReviewStroke, STROKE_MERGE_MS);
     }
 
     function cancelReviewStroke(event) {
@@ -4288,6 +4410,8 @@
     async function clearReviewStrokes() {
       const ok = await showModal("清除教師筆跡", "只會清除目前這張答案照片上的批改筆跡，確定嗎？", "confirm");
       if (!ok) return;
+      reviewPendingStroke = null;
+      if (reviewMergeTimer !== null) { clearTimeout(reviewMergeTimer); reviewMergeTimer = null; }
       state.reviewStrokes = [];
       drawReviewCanvas();
     }
@@ -4295,6 +4419,8 @@
     async function clearAllReviewStrokes() {
       const ok = await showModal("全部清除答案筆跡", "會清除目前這筆學生答案上的教師批改筆跡，確定嗎？", "confirm");
       if (!ok) return;
+      reviewPendingStroke = null;
+      if (reviewMergeTimer !== null) { clearTimeout(reviewMergeTimer); reviewMergeTimer = null; }
       state.reviewStrokes = [];
       drawReviewCanvas();
     }
@@ -4329,6 +4455,7 @@
     }
 
     async function saveReviewFeedback() {
+      commitPendingReviewStroke();
       const submission = state.reviewSubmission;
       if (!submission) return;
       const payload = { submissionId: submission.id, boardId: state.boardId, strokes: { photoIndex: state.reviewPhotoIndex, strokes: state.reviewStrokes }, comment: state.reviewComment };
