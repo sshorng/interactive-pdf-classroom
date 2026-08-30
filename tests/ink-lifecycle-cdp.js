@@ -49,20 +49,21 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 
   const result = await evaluate(`(async () => {
     const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-    const makePointer = (type, pointerId, x, y, pointerType = "pen") => new PointerEvent(type, {
+    const makePointer = (type, pointerId, x, y, pointerType = "pen", pressure = pointerType === "pen" ? .5 : 0, buttons = type === "pointerup" || type === "pointercancel" ? 0 : 1) => new PointerEvent(type, {
       bubbles: true,
       cancelable: true,
       pointerId,
       pointerType,
       isPrimary: true,
-      buttons: type === "pointerup" || type === "pointercancel" ? 0 : 1,
       clientX: x,
       clientY: y,
-      pressure: pointerType === "pen" ? .5 : 0
+      pressure,
+      buttons
     });
     const resetTeacher = () => {
       teacherInkActiveStroke = null;
       teacherInkActivePointerId = null;
+      teacherInkContactActive = false;
       state.teacherInk.set(Number(state.currentPage), []);
       state.inkTool = "pen";
       renderTeacherInk();
@@ -98,6 +99,26 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     const teacherStaleRecovery = (state.teacherInk.get(state.currentPage) || []).length === 2 && teacherInkActivePointerId === null;
 
     resetTeacher();
+    pageStage.dispatchEvent(makePointer("pointerdown", 1008, 470, 360));
+    pageStage.dispatchEvent(makePointer("pointermove", 1008, 490, 368));
+    pageStage.dispatchEvent(makePointer("pointermove", 1008, 500, 370, "pen", 0, 0));
+    pageStage.dispatchEvent(makePointer("pointerover", 1009, 540, 390, "pen", .5, 1));
+    pageStage.dispatchEvent(makePointer("pointermove", 1009, 560, 398, "pen", .5, 1));
+    pageStage.dispatchEvent(makePointer("pointerup", 1009, 560, 398, "pen", 0, 0));
+    await wait(360);
+    const teacherRelandWithoutDown = (state.teacherInk.get(state.currentPage) || []).length === 2 && teacherInkActivePointerId === null;
+
+    resetTeacher();
+    pageStage.dispatchEvent(makePointer("pointerdown", 1009, 580, 410));
+    pageStage.dispatchEvent(makePointer("pointermove", 1009, 600, 418));
+    pageStage.dispatchEvent(makePointer("pointerout", 1009, 610, 420, "pen", 0, 0));
+    pageStage.dispatchEvent(makePointer("pointerover", 1009, 640, 440, "pen", .5, 1));
+    pageStage.dispatchEvent(makePointer("pointermove", 1009, 660, 448, "pen", .5, 1));
+    pageStage.dispatchEvent(makePointer("pointerup", 1009, 660, 448, "pen", 0, 0));
+    await wait(360);
+    const teacherRelandSamePointer = (state.teacherInk.get(state.currentPage) || []).length === 2 && teacherInkActivePointerId === null;
+
+    resetTeacher();
     stroke(pageStage, 1006, 380, 380);
     pageStage.dispatchEvent(makePointer("pointerdown", 1007, 390, 390, "touch"));
     pageStage.dispatchEvent(makePointer("pointermove", 1007, 410, 398, "touch"));
@@ -114,6 +135,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     if (!reviewImage) throw new Error("批改答案圖片不存在。");
     reviewActiveStroke = null;
     reviewActivePointerId = null;
+    reviewInkContactActive = false;
     state.reviewStrokes = [];
     state.reviewTool = "pen";
     const reviewStroke = (id, x, y) => {
@@ -125,6 +147,28 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     reviewStroke(1102, 185, 183);
     await wait(360);
     const reviewSeparateStrokes = state.reviewStrokes.length === 2;
+    state.reviewStrokes = [];
+    reviewActiveStroke = null;
+    reviewActivePointerId = null;
+    reviewInkContactActive = false;
+    reviewImage.dispatchEvent(makePointer("pointerdown", 1105, 280, 250));
+    reviewImage.dispatchEvent(makePointer("pointermove", 1105, 300, 258));
+    reviewImage.dispatchEvent(makePointer("pointermove", 1105, 310, 260, "pen", 0, 0));
+    reviewImage.dispatchEvent(makePointer("pointerover", 1106, 350, 280, "pen", .5, 1));
+    reviewImage.dispatchEvent(makePointer("pointermove", 1106, 370, 288, "pen", .5, 1));
+    reviewImage.dispatchEvent(makePointer("pointerup", 1106, 370, 288, "pen", 0, 0));
+    const reviewRelandWithoutDown = state.reviewStrokes.length === 2 && reviewActivePointerId === null;
+    state.reviewStrokes = [];
+    reviewActiveStroke = null;
+    reviewActivePointerId = null;
+    reviewInkContactActive = false;
+    reviewImage.dispatchEvent(makePointer("pointerdown", 1107, 400, 310));
+    reviewImage.dispatchEvent(makePointer("pointermove", 1107, 420, 318));
+    reviewImage.dispatchEvent(makePointer("pointerout", 1107, 430, 320, "pen", 0, 0));
+    reviewImage.dispatchEvent(makePointer("pointerover", 1107, 460, 340, "pen", .5, 1));
+    reviewImage.dispatchEvent(makePointer("pointermove", 1107, 480, 348, "pen", .5, 1));
+    reviewImage.dispatchEvent(makePointer("pointerup", 1107, 480, 348, "pen", 0, 0));
+    const reviewRelandSamePointer = state.reviewStrokes.length === 2 && reviewActivePointerId === null;
     const reviewZoomBeforeTouch = state.reviewZoom;
     const makeTouch = (identifier, x, y) => {
       const touch = new Touch({ identifier, target: reviewImage, clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y, force: .5 });
@@ -171,7 +215,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     await Promise.all([oldSave, newSave]);
     const saveRaceProtected = JSON.stringify(state.teacherInk.get(Number(state.currentPage)) || []) === JSON.stringify([oldStroke, newStroke]);
     window.commitLocalMutation = originalCommitLocalMutation;
-    return JSON.stringify({ teacherSeparateStrokes, teacherShortCancel, teacherStaleRecovery, teacherFingerIgnored, reviewSeparateStrokes, reviewStylusGestureSafe, saveRaceProtected, teacherActivePointer: teacherInkActivePointerId, reviewActivePointer: reviewActivePointerId });
+    return JSON.stringify({ teacherSeparateStrokes, teacherShortCancel, teacherStaleRecovery, teacherRelandWithoutDown, teacherRelandSamePointer, teacherFingerIgnored, reviewSeparateStrokes, reviewRelandWithoutDown, reviewRelandSamePointer, reviewStylusGestureSafe, saveRaceProtected, teacherActivePointer: teacherInkActivePointerId, reviewActivePointer: reviewActivePointerId });
   })()`);
 
   const checks = JSON.parse(result);
