@@ -968,14 +968,6 @@
       document.addEventListener("gesturestart", function (event) { event.preventDefault(); });
       document.addEventListener("gesturechange", function (event) { event.preventDefault(); });
       document.addEventListener("gestureend", function (event) { event.preventDefault(); });
-      window.addEventListener("applepencildoubletap", function (event) {
-        event.preventDefault();
-        togglePencilEraser();
-      });
-      document.addEventListener("applepencildoubletap", function (event) {
-        event.preventDefault();
-        togglePencilEraser();
-      });
       window.addEventListener("keydown", function (event) {
         if (event.target && event.target.matches("input, textarea, select")) return;
         if (event.key === "e" || event.key === "E") {
@@ -2485,7 +2477,7 @@
 
     function cancelTeacherInk(event) {
       if (event && event.pointerId !== teacherInkActivePointerId) return;
-      if (teacherInkActiveStroke && teacherInkActiveStroke.points && teacherInkActiveStroke.points.length > 1) {
+      if (teacherInkActiveStroke && teacherInkActiveStroke.points && teacherInkActiveStroke.points.length > 0) {
         finishTeacherInk(event, true);
       } else {
          const pointerId = teacherInkActivePointerId;
@@ -4243,7 +4235,7 @@
 
     function cancelReviewStroke(event) {
       if (event && event.pointerId !== reviewActivePointerId) return;
-      if (reviewActiveStroke && reviewActiveStroke.points && reviewActiveStroke.points.length > 1) {
+      if (reviewActiveStroke && reviewActiveStroke.points && reviewActiveStroke.points.length > 0) {
         finishReviewStroke(event, true);
       } else {
         const pointerId = reviewActivePointerId;
