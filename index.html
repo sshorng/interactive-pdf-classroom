@@ -587,7 +587,6 @@
     const MAX_PDF_BYTES = 20 * 1024 * 1024;
     const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
     const INK_WIDTH_STEPS = [2, 4, 6, 8];
-    const INK_TAP_DISTANCE = 0.01;
     const GAS_URL = resolveGasUrl();
 
     if (window.pdfjsLib) {
@@ -621,7 +620,7 @@
       previousInkTool: "pen",
       inkShape: "arrow",
       inkColor: "#c47f78",
-      inkWidth: 4,
+      inkWidth: 2,
       inkSaveTimer: null,
       classroomStateTimer: null,
       submissions: [],
@@ -632,7 +631,7 @@
       reviewStrokes: [],
       reviewComment: "",
       reviewColor: "#d34f42",
-      reviewWidth: 4,
+      reviewWidth: 2,
       reviewTool: "pen",
       previousReviewTool: "pen",
       reviewShape: "arrow",
@@ -2028,7 +2027,7 @@
       controls.querySelectorAll("[data-ink-color]").forEach(function (button) { button.addEventListener("click", function () { state.inkColor = button.dataset.inkColor; updateInkControls(); }); });
       controls.querySelectorAll("[data-ink-width]").forEach(function (button) {
         button.addEventListener("click", function () {
-          state.inkWidth = Number(button.dataset.inkWidth) || 4;
+           state.inkWidth = Number(button.dataset.inkWidth) || 2;
           updateInkControls();
         });
       });
@@ -2220,10 +2219,6 @@
     let teacherInkActiveStroke = null;
     let teacherInkErasing = false;
     let teacherInkChanged = false;
-    let teacherInkStartTime = 0;
-    let teacherInkStartPoint = null;
-    let teacherInkMoved = false;
-    let lastTeacherTipTap = null;
     let teacherInkPreviewFrame = null;
     let teacherInkRenderedPointCount = 0;
 
@@ -2336,11 +2331,6 @@
       canvas.addEventListener("touchmove", moveTeacherInkTouch, { passive: false });
       canvas.addEventListener("touchend", finishTeacherInkTouch, { passive: false });
       canvas.addEventListener("touchcancel", cancelTeacherInkTouch, { passive: false });
-      canvas.addEventListener("dblclick", function (event) {
-        if (event.pointerType === "pen") {
-          togglePencilEraser();
-        }
-      });
     }
 
     function beginTeacherInk(event) {
@@ -2355,9 +2345,6 @@
         try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
       }
       const point = canvasPoint(event, canvas);
-      teacherInkStartTime = performance.now();
-      teacherInkStartPoint = point;
-      teacherInkMoved = false;
       teacherInkChanged = false;
       teacherInkRenderedPointCount = 1;
       if (teacherInkPreviewFrame !== null) {
@@ -2450,10 +2437,6 @@
       const canvas = document.getElementById("inkCanvas") || event.currentTarget;
       const events = pointerSamples(event);
       const lastPoint = canvasPoint(events[events.length - 1], canvas);
-      if (teacherInkStartPoint) events.forEach(function (item) {
-        const point = canvasPoint(item, canvas);
-        if (Math.hypot(point.x - teacherInkStartPoint.x, point.y - teacherInkStartPoint.y) > INK_TAP_DISTANCE) teacherInkMoved = true;
-      });
       if (teacherInkErasing) {
         events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, canvas)); });
          return;
@@ -2473,10 +2456,6 @@
       const pointerId = teacherInkActivePointerId;
       const canvas = document.getElementById("inkCanvas") || (event && event.currentTarget);
       const events = pointerSamples(event);
-      if (!cancelled && events.length && canvas && teacherInkStartPoint) events.forEach(function (item) {
-        const point = canvasPoint(item, canvas);
-        if (Math.hypot(point.x - teacherInkStartPoint.x, point.y - teacherInkStartPoint.y) > INK_TAP_DISTANCE) teacherInkMoved = true;
-      });
       if (!cancelled && events.length && canvas && teacherInkErasing) events.forEach(function (item) { eraseTeacherInkAt(canvasPoint(item, canvas)); });
       if (!cancelled && events.length && canvas && teacherInkActiveStroke) {
         const lastPoint = canvasPoint(events[events.length - 1], canvas);
@@ -2488,29 +2467,6 @@
       if (teacherInkPreviewFrame !== null) {
         cancelAnimationFrame(teacherInkPreviewFrame);
         teacherInkPreviewFrame = null;
-      }
-      const duration = performance.now() - teacherInkStartTime;
-      const isTap = !cancelled && !teacherInkMoved && duration < 240;
-      const pt = teacherInkStartPoint || (teacherInkActiveStroke && teacherInkActiveStroke.points[0]) || { x: 0, y: 0 };
-      const now = performance.now();
-      if (isTap && event && event.pointerType === "pen") {
-        if (lastTeacherTipTap && (now - lastTeacherTipTap.time < 380) && Math.hypot(pt.x - lastTeacherTipTap.x, pt.y - lastTeacherTipTap.y) < 0.04) {
-          lastTeacherTipTap = null;
-          teacherInkActiveStroke = null;
-          teacherInkErasing = false;
-          teacherInkChanged = false;
-          if (event && typeof event.stopPropagation === "function") event.stopPropagation();
-          const strokes = teacherInkForPage(state.currentPage).slice();
-          if (strokes.length > 0 && strokes[strokes.length - 1].points.length <= 2) strokes.pop();
-          state.teacherInk.set(Number(state.currentPage), strokes);
-          renderTeacherInk();
-          scheduleTeacherInkSave();
-          togglePencilEraser();
-          return;
-        }
-        lastTeacherTipTap = { x: pt.x, y: pt.y, time: now };
-      } else {
-        lastTeacherTipTap = null;
       }
       if (teacherInkErasing) {
         teacherInkErasing = false;
@@ -3869,7 +3825,7 @@
       panel.querySelectorAll("[data-review-width]").forEach(function (btn) {
         btn.classList.toggle("active", Number(btn.dataset.reviewWidth) === state.reviewWidth);
         btn.addEventListener("click", function () {
-          state.reviewWidth = Number(btn.dataset.reviewWidth) || 4;
+           state.reviewWidth = Number(btn.dataset.reviewWidth) || 2;
           panel.querySelectorAll("[data-review-width]").forEach(function (item) {
             item.classList.toggle("active", Number(item.dataset.reviewWidth) === state.reviewWidth);
           });
@@ -4163,10 +4119,6 @@
     let reviewErasing = false;
     let reviewInkChanged = false;
     let isReviewPinching = false;
-    let reviewStartTime = 0;
-    let reviewStartPoint = null;
-    let reviewMoved = false;
-    let lastReviewTipTap = null;
     let reviewInkPreviewFrame = null;
     let reviewInkRenderedPointCount = 0;
 
@@ -4181,9 +4133,6 @@
         try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
       }
       const point = canvasPoint(event, canvas);
-      reviewStartTime = performance.now();
-      reviewStartPoint = point;
-      reviewMoved = false;
       reviewInkChanged = false;
       reviewInkRenderedPointCount = 1;
       if (reviewInkPreviewFrame !== null) {
@@ -4206,10 +4155,6 @@
       event.preventDefault();
       const events = pointerSamples(event);
       const lastPoint = canvasPoint(events[events.length - 1], canvas);
-      if (reviewStartPoint) events.forEach(function (item) {
-        const point = canvasPoint(item, canvas);
-        if (Math.hypot(point.x - reviewStartPoint.x, point.y - reviewStartPoint.y) > INK_TAP_DISTANCE) reviewMoved = true;
-      });
       if (reviewErasing) {
         events.forEach(function (item) { eraseReviewStrokeAt(canvasPoint(item, canvas)); });
         return;
@@ -4266,11 +4211,6 @@
       canvas.addEventListener("touchmove", moveReviewInkTouch, { passive: false });
       canvas.addEventListener("touchend", finishReviewInkTouch, { passive: false });
       canvas.addEventListener("touchcancel", cancelReviewInkTouch, { passive: false });
-      canvas.addEventListener("dblclick", function (event) {
-        if (event.pointerType === "pen") {
-          togglePencilEraser();
-        }
-      });
     }
 
     function finishReviewStroke(event, cancelled) {
@@ -4278,10 +4218,6 @@
       const pointerId = reviewActivePointerId;
       const canvas = document.getElementById("reviewCanvas") || (event && event.currentTarget);
       const events = pointerSamples(event);
-      if (!cancelled && events.length && canvas && reviewStartPoint) events.forEach(function (item) {
-        const point = canvasPoint(item, canvas);
-        if (Math.hypot(point.x - reviewStartPoint.x, point.y - reviewStartPoint.y) > INK_TAP_DISTANCE) reviewMoved = true;
-      });
       if (!cancelled && events.length && canvas && reviewActiveStroke) {
         const lastPoint = canvasPoint(events[events.length - 1], canvas);
         if (reviewActiveStroke.tool === "shape") reviewActiveStroke.points = [reviewActiveStroke.points[0], lastPoint];
@@ -4293,27 +4229,6 @@
       if (reviewInkPreviewFrame !== null) {
         cancelAnimationFrame(reviewInkPreviewFrame);
         reviewInkPreviewFrame = null;
-      }
-      const duration = performance.now() - reviewStartTime;
-      const isTap = !cancelled && !reviewMoved && duration < 450;
-      const pt = reviewStartPoint || (reviewActiveStroke && reviewActiveStroke.points[0]) || { x: 0, y: 0 };
-      const now = performance.now();
-      if (isTap && event && event.pointerType === "pen") {
-        if (lastReviewTipTap && (now - lastReviewTipTap.time < 550) && Math.hypot(pt.x - lastReviewTipTap.x, pt.y - lastReviewTipTap.y) < 0.12) {
-          lastReviewTipTap = null;
-          reviewActiveStroke = null;
-          reviewErasing = false;
-          reviewInkChanged = false;
-          if (state.reviewStrokes.length > 0 && state.reviewStrokes[state.reviewStrokes.length - 1].points.length <= 4) {
-            state.reviewStrokes.pop();
-          }
-          drawReviewCanvas();
-          togglePencilEraser();
-          return;
-        }
-        lastReviewTipTap = { x: pt.x, y: pt.y, time: now };
-      } else {
-        lastReviewTipTap = null;
       }
       if (reviewErasing) {
         reviewErasing = false;
