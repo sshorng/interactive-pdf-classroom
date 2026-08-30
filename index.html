@@ -1003,12 +1003,7 @@
           renderStudentAreaList();
           renderZones();
         } else if (state.view === "review" && state.boardId) {
-          await loadBoardContext(state.boardId);
-          await loadClassroomSync();
-          await loadClassroomSubmissions();
-          renderClassroomSidebar();
-          renderZones();
-          renderTeacherInk();
+          await refreshClassroomView();
         } else if (state.view === "editor" && state.boardId) {
           await loadBoardContext(state.boardId);
           renderEditorAreaList();
@@ -1021,30 +1016,54 @@
       }
     }
 
-    function bindPullToRefresh() {
+    async function refreshClassroomView() {
+      if (state.view !== "review" || !state.boardId) return;
+      const localInk = new Map();
+      state.teacherInk.forEach(function (strokes, page) {
+        localInk.set(Number(page) || 1, JSON.parse(JSON.stringify(strokes || [])));
+      });
+      const localRevisions = new Map(teacherInkRevision);
+      await loadClassroomSync();
+      await loadReviewSubmissions();
+      localRevisions.forEach(function (revision, page) {
+        if (teacherInkRevision.get(page) === revision) state.teacherInk.set(page, localInk.get(page) || []);
+      });
+      renderReviewAreaList();
+      renderZones();
+      renderTeacherInk();
+    }
+
+    function bindPullToRefreshTarget(target, canStart, refresh, indicator) {
+      if (!target || !indicator) return;
       let startY = 0;
       let isPulling = false;
       let isRefreshing = false;
+      let startedWithStylus = false;
       const threshold = 70;
-      const indicator = document.getElementById("pullRefreshIndicator");
-      if (!indicator) return;
       const icon = indicator.querySelector(".pull-icon");
       const text = indicator.querySelector(".pull-text");
+      const hideIndicator = function () {
+        indicator.style.top = "-60px";
+        indicator.classList.remove("visible", "refreshing");
+        if (icon) icon.textContent = "↓";
+        if (text) text.textContent = "下拉重新整理";
+      };
 
-      window.addEventListener("touchstart", function (event) {
-        if (isRefreshing || event.touches.length !== 1) return;
-        if (state.view !== "manager") return;
-        const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
-        const target = event.target;
-        if (target && target.closest && target.closest(".modal-card, .review-panel, textarea, input, select, .pdf-scroll, .classroom-pdf-panel, .student-workspace")) return;
-        if (scrollY <= 5) {
-          startY = event.touches[0].clientY;
-          isPulling = true;
-        }
+      target.addEventListener("touchstart", function (event) {
+        if (isRefreshing || !event.touches || event.touches.length !== 1) return;
+        startedWithStylus = touchEventHasStylus(event);
+        if (startedWithStylus || !canStart(event)) return;
+        startY = event.touches[0].clientY;
+        isPulling = true;
       }, { passive: true });
 
-      window.addEventListener("touchmove", function (event) {
-        if (!isPulling || isRefreshing || event.touches.length !== 1) return;
+      target.addEventListener("touchmove", function (event) {
+        if (!isPulling || isRefreshing) return;
+        if (startedWithStylus || !event.touches || event.touches.length !== 1) {
+          isPulling = false;
+          if (!isRefreshing) hideIndicator();
+          return;
+        }
         const currentY = event.touches[0].clientY;
         const diff = currentY - startY;
         if (diff > 10) {
@@ -1063,36 +1082,63 @@
         }
       }, { passive: true });
 
-      window.addEventListener("touchend", async function (event) {
+      target.addEventListener("touchend", async function (event) {
         if (!isPulling || isRefreshing) { isPulling = false; return; }
         isPulling = false;
-        const touch = event.changedTouches[0];
+        const touch = event.changedTouches && event.changedTouches[0];
         if (!touch) return;
         const diff = touch.clientY - startY;
-        if (diff * 0.45 >= threshold * 0.45) {
+        if (!startedWithStylus && diff >= threshold) {
           isRefreshing = true;
           indicator.style.top = "18px";
           indicator.classList.add("visible", "refreshing");
           if (icon) icon.textContent = "↻";
           if (text) text.textContent = "正在重新整理……";
-          await refreshCurrentView();
-          indicator.classList.remove("refreshing");
-          indicator.style.top = "-60px";
-          indicator.classList.remove("visible");
-          isRefreshing = false;
+          try {
+            await refresh();
+            showToast("已更新至最新資料。", "success");
+          } catch (error) {
+            showToast("重新整理失敗：" + (error.message || "網路連線異常。"), "error");
+          } finally {
+            isRefreshing = false;
+            hideIndicator();
+          }
         } else {
-          indicator.style.top = "-60px";
-          indicator.classList.remove("visible");
+          hideIndicator();
         }
       }, { passive: true });
 
-      window.addEventListener("touchcancel", function () {
+      target.addEventListener("touchcancel", function () {
         isPulling = false;
-        if (!isRefreshing) {
-          indicator.style.top = "-60px";
-          indicator.classList.remove("visible");
-        }
+        startedWithStylus = false;
+        if (!isRefreshing) hideIndicator();
       }, { passive: true });
+    }
+
+    function bindPullToRefresh() {
+      const indicator = document.getElementById("pullRefreshIndicator");
+      if (!indicator) return;
+      bindPullToRefreshTarget(window, function (event) {
+        if (state.view !== "manager") return false;
+        const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+        const target = event.target;
+        if (target && target.closest && target.closest(".modal-card, .review-panel, textarea, input, select, .pdf-scroll, .classroom-pdf-panel, .student-workspace")) return false;
+        return scrollY <= 5;
+      }, refreshCurrentView, indicator);
+    }
+
+    function bindClassroomPullToRefresh(scroll) {
+      if (!scroll || scroll.dataset.pullRefreshBound === "1") return;
+      const indicator = document.getElementById("pullRefreshIndicator");
+      if (!indicator) return;
+      scroll.dataset.pullRefreshBound = "1";
+      bindPullToRefreshTarget(scroll, function (event) {
+        if (state.view !== "review" || scroll.scrollTop > 5) return false;
+        if (teacherInkActivePointerId !== null || reviewActivePointerId !== null) return false;
+        const target = event.target;
+        if (target && target.closest && target.closest(".pdf-toolbar, .toolbar-button, .classroom-toolbar-title, .zone, textarea, input, select, button")) return false;
+        return true;
+      }, refreshClassroomView, indicator);
     }
 
     async function refreshSheetLink() {
@@ -1657,7 +1703,11 @@
       state.areas = Array.isArray(result.areas) ? result.areas : [];
       state.pdf = null;
       state.pdfBytes = null;
+      window.clearTimeout(state.inkSaveTimer);
+      state.inkSaveTimer = null;
       state.teacherInk.clear();
+      teacherInkRevision.clear();
+      teacherInkSaveChains.clear();
       state.teacherInkVersion = "";
       state.currentPage = 1;
       state.zoom = 1;
@@ -2046,8 +2096,10 @@
       if (status) status.textContent = message;
     }
 
-     async function loadTeacherInk() {
-      state.teacherInk.clear();
+      async function loadTeacherInk() {
+       state.teacherInk.clear();
+       teacherInkRevision.clear();
+       teacherInkSaveChains.clear();
       let result;
       try {
         result = await managerApi("listInk", { boardId: state.boardId });
@@ -2069,26 +2121,51 @@
       return state.teacherInk.get(Number(page)) || [];
     }
 
-    function scheduleTeacherInkSave() {
-      const page = Number(state.currentPage) || 1;
-      window.clearTimeout(state.inkSaveTimer);
-      state.inkSaveTimer = window.setTimeout(function () { persistTeacherInk(page); }, 450);
-      setInkStatus("手寫暫存中");
-    }
+     function markTeacherInkChanged(page) {
+       const key = Number(page) || 1;
+       teacherInkRevision.set(key, (teacherInkRevision.get(key) || 0) + 1);
+       return teacherInkRevision.get(key);
+     }
 
-    async function persistTeacherInk(page) {
-      if (!state.board) return;
-      const strokes = JSON.parse(JSON.stringify(teacherInkForPage(page)));
-      const payload = { id: "INK-" + state.board.id + "-" + page, boardId: state.board.id, page: page, strokes: strokes };
-      try {
-        const result = await commitLocalMutation("saveInk", payload);
-        if (result.annotation && Number(page) === Number(state.currentPage)) state.teacherInk.set(page, result.annotation.strokes || strokes);
-        setInkStatus(state.demo ? "手寫已保存" : "手寫已本機保存，背景同步中");
-      } catch (error) {
-        setInkStatus("手寫本機保存失敗");
-        await showModal("手寫保存失敗", error.message || "請稍後再試。", "error");
-      }
-    }
+     function scheduleTeacherInkSave() {
+       const page = Number(state.currentPage) || 1;
+       const boardId = state.board ? String(state.board.id) : "";
+       markTeacherInkChanged(page);
+       window.clearTimeout(state.inkSaveTimer);
+       state.inkSaveTimer = window.setTimeout(function () { persistTeacherInk(page, boardId); }, 450);
+       setInkStatus("手寫暫存中");
+     }
+
+     function persistTeacherInk(page, boardId) {
+       const key = Number(page) || 1;
+       const targetBoardId = String(boardId || (state.board && state.board.id) || "");
+       if (!targetBoardId) return Promise.resolve();
+       const revision = teacherInkRevision.get(key) || 0;
+       const previous = teacherInkSaveChains.get(key) || Promise.resolve();
+       const task = previous.catch(function () {}).then(async function () {
+         const strokes = JSON.parse(JSON.stringify(teacherInkForPage(key)));
+         const payload = { id: "INK-" + targetBoardId + "-" + key, boardId: targetBoardId, page: key, strokes: strokes };
+         try {
+           const result = await commitLocalMutation("saveInk", payload);
+           const isCurrent = teacherInkRevision.get(key) === revision && state.board && String(state.board.id) === targetBoardId;
+           if (isCurrent) {
+             if (result.annotation && Number(key) === Number(state.currentPage)) state.teacherInk.set(key, result.annotation.strokes || strokes);
+             teacherInkRevision.delete(key);
+             setInkStatus(state.demo ? "手寫已保存" : "手寫已本機保存，背景同步中");
+           }
+         } catch (error) {
+           const isCurrent = teacherInkRevision.get(key) === revision && state.board && String(state.board.id) === targetBoardId;
+           if (!isCurrent) return;
+           setInkStatus("手寫本機保存失敗");
+           await showModal("手寫保存失敗", error.message || "請稍後再試。", "error");
+         }
+       });
+       let tracked = task.finally(function () {
+         if (teacherInkSaveChains.get(key) === tracked) teacherInkSaveChains.delete(key);
+       });
+       teacherInkSaveChains.set(key, tracked);
+       return tracked;
+     }
 
     async function loadClassroomSync() {
       if (!state.boardId) return;
@@ -2165,9 +2242,11 @@
     async function clearTeacherInk() {
       const ok = await showModal("清除本頁手寫", "只會清除目前 PDF 頁面的教師手寫，確定嗎？", "confirm");
       if (!ok) return;
-      state.teacherInk.set(Number(state.currentPage), []);
+      const page = Number(state.currentPage) || 1;
+      state.teacherInk.set(page, []);
+      markTeacherInkChanged(page);
       renderTeacherInk();
-      await persistTeacherInk(Number(state.currentPage));
+      await persistTeacherInk(page, state.board && state.board.id);
     }
 
     async function clearAllTeacherInk() {
@@ -2176,7 +2255,10 @@
       const pages = new Set(Array.from(state.teacherInk.keys()).concat([Number(state.currentPage) || 1]));
       state.teacherInk.clear();
       renderTeacherInk();
-      for (const page of pages) await persistTeacherInk(page);
+      for (const page of pages) {
+        markTeacherInkChanged(page);
+        await persistTeacherInk(page, state.board && state.board.id);
+      }
     }
 
     function togglePencilEraser() {
@@ -2214,14 +2296,8 @@
     let teacherInkPreviewFrame = null;
     let teacherInkRenderedPointCount = 0;
 
-    // ── Stroke continuation（仿 GoodNotes 防斷筆）──
-    // 筆稍微提起再落下時，若時空距離夠近就自動續接同一筆劃
-    const STROKE_MERGE_MS = 120;        // 提筆後多久內落筆可續接（毫秒）
-    const STROKE_MERGE_DIST = 0.035;    // 正規化座標距離門檻
-    let teacherInkPendingStroke = null;  // 等待續接的暫存筆劃
-    let teacherInkMergeTimer = null;     // 續接逾時計時器
-    let teacherInkLastEndPoint = null;   // 上一筆最後一個點
-    let teacherInkLastEndTime = 0;       // 上一筆結束時間戳
+    const teacherInkRevision = new Map();
+    const teacherInkSaveChains = new Map();
 
     function isStylusTouch(touch) {
       const type = String(touch && touch.touchType || "").toLowerCase();
@@ -2323,32 +2399,20 @@
       const canvas = document.getElementById("inkCanvas");
       if (!canvas || canvas.dataset.bound === "1") return;
       canvas.dataset.bound = "1";
-       canvas.style.touchAction = "none";
+      const target = canvas.parentElement || canvas;
+      canvas.style.touchAction = "none";
       canvas.style.willChange = "transform";
-      canvas.addEventListener("pointerdown", beginTeacherInk);
-      canvas.addEventListener("pointermove", moveTeacherInk);
-      canvas.addEventListener("pointerrawupdate", moveTeacherInk);
-      canvas.addEventListener("pointerup", finishTeacherInk);
-      canvas.addEventListener("pointercancel", cancelTeacherInk);
-      canvas.addEventListener("lostpointercapture", cancelTeacherInk);
-      canvas.addEventListener("touchstart", beginTeacherInkTouch, { passive: false });
-      canvas.addEventListener("touchmove", moveTeacherInkTouch, { passive: false });
-      canvas.addEventListener("touchend", finishTeacherInkTouch, { passive: false });
-      canvas.addEventListener("touchcancel", cancelTeacherInkTouch, { passive: false });
-    }
-
-    function commitPendingTeacherStroke() {
-      if (teacherInkMergeTimer !== null) {
-        clearTimeout(teacherInkMergeTimer);
-        teacherInkMergeTimer = null;
-      }
-      if (!teacherInkPendingStroke) return;
-      const strokes = teacherInkForPage(state.currentPage).slice();
-      strokes.push(teacherInkPendingStroke);
-      state.teacherInk.set(Number(state.currentPage), strokes);
-      teacherInkPendingStroke = null;
-      renderTeacherInk();
-      scheduleTeacherInkSave();
+      target.style.touchAction = "none";
+      target.addEventListener("pointerdown", beginTeacherInk);
+      target.addEventListener("pointermove", moveTeacherInk);
+      target.addEventListener("pointerrawupdate", moveTeacherInk);
+      target.addEventListener("pointerup", finishTeacherInk);
+      target.addEventListener("pointercancel", cancelTeacherInk);
+      target.addEventListener("lostpointercapture", cancelTeacherInk);
+      target.addEventListener("touchstart", beginTeacherInkTouch, { passive: false });
+      target.addEventListener("touchmove", moveTeacherInkTouch, { passive: false });
+      target.addEventListener("touchend", finishTeacherInkTouch, { passive: false });
+      target.addEventListener("touchcancel", cancelTeacherInkTouch, { passive: false });
     }
 
     function beginTeacherInk(event) {
@@ -2362,7 +2426,8 @@
       event.preventDefault();
       teacherInkActivePointerId = event.pointerId;
       const canvas = document.getElementById("inkCanvas") || event.currentTarget;
-      if (typeof canvas.setPointerCapture === "function") {
+      // pen 不設 pointer capture — iPad 上 capture 會導致 lostpointercapture 斷筆
+      if (event.pointerType !== "pen" && typeof canvas.setPointerCapture === "function") {
         try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
       }
       const point = canvasPoint(event, canvas);
@@ -2372,35 +2437,10 @@
         teacherInkPreviewFrame = null;
       }
       if (state.inkTool === "eraser") {
-        commitPendingTeacherStroke();
         teacherInkErasing = true;
         eraseTeacherInkAt(point);
         return;
       }
-      // ── 續接判定：若在短時間內、靠近上一筆末端，就續接而非新起一筆 ──
-      const now = Date.now();
-      if (
-        teacherInkPendingStroke &&
-        teacherInkLastEndPoint &&
-        (now - teacherInkLastEndTime) < STROKE_MERGE_MS &&
-        Math.hypot(point.x - teacherInkLastEndPoint.x, point.y - teacherInkLastEndPoint.y) < STROKE_MERGE_DIST &&
-        teacherInkPendingStroke.tool === state.inkTool &&
-        teacherInkPendingStroke.color === state.inkColor
-      ) {
-        // 取消逾時，把暫存筆劃接回 active 繼續畫
-        if (teacherInkMergeTimer !== null) {
-          clearTimeout(teacherInkMergeTimer);
-          teacherInkMergeTimer = null;
-        }
-        teacherInkActiveStroke = teacherInkPendingStroke;
-        teacherInkPendingStroke = null;
-        teacherInkActiveStroke.points.push(point);
-        teacherInkRenderedPointCount = teacherInkActiveStroke.points.length;
-        renderTeacherInk();
-        return;
-      }
-      // 若有暫存但不符合續接條件，先送出再開新筆
-      commitPendingTeacherStroke();
       teacherInkRenderedPointCount = 1;
       teacherInkActiveStroke = { tool: state.inkTool, shape: state.inkShape, color: state.inkColor, width: state.inkWidth / 800, points: [point] };
       renderTeacherInk();
@@ -2477,7 +2517,9 @@
     }
 
     function moveTeacherInk(event) {
-      if (event.pointerId !== undefined && String(event.pointerId) !== String(teacherInkActivePointerId)) return;
+      if (event.pointerId !== undefined && String(event.pointerId) !== String(teacherInkActivePointerId)) {
+        return;
+      }
       if (!teacherInkActiveStroke && !teacherInkErasing) return;
       event.preventDefault();
       const canvas = document.getElementById("inkCanvas") || event.currentTarget;
@@ -2521,26 +2563,12 @@
         return;
       }
       if (!teacherInkActiveStroke) return;
-      // 圖形與螢光筆不做續接，直接送出
-      if (teacherInkActiveStroke.tool === "shape" || teacherInkActiveStroke.tool === "highlighter") {
-        commitPendingTeacherStroke();
-        const strokes = teacherInkForPage(state.currentPage).slice();
-        strokes.push(teacherInkActiveStroke);
-        state.teacherInk.set(Number(state.currentPage), strokes);
-        teacherInkActiveStroke = null;
-        renderTeacherInk();
-        scheduleTeacherInkSave();
-        return;
-      }
-      // 手寫筆：暫存等待續接（先送出前一筆暫存）
-      commitPendingTeacherStroke();
-      const lastPts = teacherInkActiveStroke.points;
-      teacherInkLastEndPoint = lastPts.length ? lastPts[lastPts.length - 1] : null;
-      teacherInkLastEndTime = Date.now();
-      teacherInkPendingStroke = teacherInkActiveStroke;
+      const strokes = teacherInkForPage(state.currentPage).slice();
+      strokes.push(teacherInkActiveStroke);
+      state.teacherInk.set(Number(state.currentPage), strokes);
       teacherInkActiveStroke = null;
-      // 暫存逾時後自動送出
-      teacherInkMergeTimer = setTimeout(commitPendingTeacherStroke, STROKE_MERGE_MS);
+      renderTeacherInk();
+      scheduleTeacherInkSave();
     }
 
     function cancelTeacherInk(event) {
@@ -2610,7 +2638,6 @@
       }
       const teacherView = state.view === "editor" || state.view === "review" || state.view === "student";
       const strokes = teacherInkForPage(state.currentPage).slice();
-      if (teacherInkPendingStroke) strokes.push(teacherInkPendingStroke);
       if (teacherInkActiveStroke) strokes.push(teacherInkActiveStroke);
       canvas.classList.toggle("visible", teacherView && (strokes.length > 0 || state.view === "review" || state.view === "editor"));
       drawTeacherInkStrokes(canvas, strokes);
@@ -3078,7 +3105,7 @@
 
     function changePage(delta) {
       if (!state.pdf) return;
-      commitPendingTeacherStroke();
+      if (teacherInkActiveStroke || teacherInkErasing) finishTeacherInk(null, true);
       state.currentPage = clamp(state.currentPage + delta, 1, state.pdf.numPages);
       renderPdfPage();
       scheduleClassroomStateSave();
@@ -3598,11 +3625,13 @@
         title.appendChild(name);
         title.appendChild(share);
         toolbar.insertBefore(title, toolbar.firstChild);
-      }
-      setupTeacherPdfWorkspace();
-      movePageNavigationToBottom(toolbar, mount.querySelector(".classroom-pdf-panel"), "classroomPageNav");
-      bindPdfSwipe(mount.querySelector(".classroom-pdf-panel .pdf-scroll"));
-    }
+       }
+       setupTeacherPdfWorkspace();
+       movePageNavigationToBottom(toolbar, mount.querySelector(".classroom-pdf-panel"), "classroomPageNav");
+       const classroomScroll = mount.querySelector(".classroom-pdf-panel .pdf-scroll");
+       bindPdfSwipe(classroomScroll);
+       bindClassroomPullToRefresh(classroomScroll);
+     }
 
     function reviewRowsForActiveArea() {
       return state.activeAreaId ? state.submissions.filter(function (item) { return String(item.areaId) === String(state.activeAreaId); }) : [];
@@ -4154,7 +4183,6 @@
       const canvas = document.getElementById("reviewCanvas");
       if (!canvas) return;
       const strokes = state.reviewStrokes.slice();
-      if (reviewPendingStroke) strokes.push(reviewPendingStroke);
       if (reviewActiveStroke) strokes.push(reviewActiveStroke);
       drawTeacherInkStrokes(canvas, strokes);
       if (reviewActiveStroke) reviewInkRenderedPointCount = reviewActiveStroke.points.length;
@@ -4189,23 +4217,6 @@
     let reviewInkPreviewFrame = null;
     let reviewInkRenderedPointCount = 0;
 
-    // ── Review 側續接防斷筆 ──
-    let reviewPendingStroke = null;
-    let reviewMergeTimer = null;
-    let reviewLastEndPoint = null;
-    let reviewLastEndTime = 0;
-
-    function commitPendingReviewStroke() {
-      if (reviewMergeTimer !== null) {
-        clearTimeout(reviewMergeTimer);
-        reviewMergeTimer = null;
-      }
-      if (!reviewPendingStroke) return;
-      state.reviewStrokes.push(reviewPendingStroke);
-      reviewPendingStroke = null;
-      drawReviewCanvas();
-    }
-
     function beginReviewInk(event) {
       const canvas = event.currentTarget || document.getElementById("reviewCanvas");
       if (!canvas || isReviewPinching) return;
@@ -4217,7 +4228,7 @@
       }
       event.preventDefault();
       reviewActivePointerId = event.pointerId;
-      if (typeof canvas.setPointerCapture === "function") {
+      if (event.pointerType !== "pen" && typeof canvas.setPointerCapture === "function") {
         try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
       }
       const point = canvasPoint(event, canvas);
@@ -4227,33 +4238,10 @@
         reviewInkPreviewFrame = null;
       }
       if (state.reviewTool === "eraser") {
-        commitPendingReviewStroke();
         reviewErasing = true;
         eraseReviewStrokeAt(point);
         return;
       }
-      // ── 續接判定 ──
-      const now = Date.now();
-      if (
-        reviewPendingStroke &&
-        reviewLastEndPoint &&
-        (now - reviewLastEndTime) < STROKE_MERGE_MS &&
-        Math.hypot(point.x - reviewLastEndPoint.x, point.y - reviewLastEndPoint.y) < STROKE_MERGE_DIST &&
-        reviewPendingStroke.tool === state.reviewTool &&
-        reviewPendingStroke.color === state.reviewColor
-      ) {
-        if (reviewMergeTimer !== null) {
-          clearTimeout(reviewMergeTimer);
-          reviewMergeTimer = null;
-        }
-        reviewActiveStroke = reviewPendingStroke;
-        reviewPendingStroke = null;
-        reviewActiveStroke.points.push(point);
-        reviewInkRenderedPointCount = reviewActiveStroke.points.length;
-        drawReviewCanvas();
-        return;
-      }
-      commitPendingReviewStroke();
       reviewInkRenderedPointCount = 1;
       reviewActiveStroke = { tool: state.reviewTool, shape: state.reviewShape, color: state.reviewColor, width: state.reviewWidth / 800, points: [point] };
       drawReviewCanvas();
@@ -4261,7 +4249,9 @@
 
     function moveReviewInk(event) {
       const canvas = event.currentTarget || document.getElementById("reviewCanvas");
-      if (!canvas || (event.pointerId !== undefined && String(event.pointerId) !== String(reviewActivePointerId))) return;
+      if (!canvas || (event.pointerId !== undefined && String(event.pointerId) !== String(reviewActivePointerId))) {
+        return;
+      }
       if (!reviewActiveStroke && !reviewErasing) return;
       event.preventDefault();
       const events = pointerSamples(event);
@@ -4314,18 +4304,20 @@
     function bindReviewCanvas(canvas) {
       if (!canvas || canvas.dataset.bound === "1") return;
       canvas.dataset.bound = "1";
+      const target = canvas.parentElement || canvas;
       canvas.style.touchAction = "none";
       canvas.style.willChange = "transform";
-      canvas.addEventListener("pointerdown", beginReviewInk);
-      canvas.addEventListener("pointermove", moveReviewInk);
-      canvas.addEventListener("pointerrawupdate", moveReviewInk);
-      canvas.addEventListener("pointerup", finishReviewStroke);
-      canvas.addEventListener("pointercancel", cancelReviewStroke);
-      canvas.addEventListener("lostpointercapture", cancelReviewStroke);
-      canvas.addEventListener("touchstart", beginReviewInkTouch, { passive: false });
-      canvas.addEventListener("touchmove", moveReviewInkTouch, { passive: false });
-      canvas.addEventListener("touchend", finishReviewInkTouch, { passive: false });
-      canvas.addEventListener("touchcancel", cancelReviewInkTouch, { passive: false });
+      target.style.touchAction = "none";
+      target.addEventListener("pointerdown", beginReviewInk);
+      target.addEventListener("pointermove", moveReviewInk);
+      target.addEventListener("pointerrawupdate", moveReviewInk);
+      target.addEventListener("pointerup", finishReviewStroke);
+      target.addEventListener("pointercancel", cancelReviewStroke);
+      target.addEventListener("lostpointercapture", cancelReviewStroke);
+      target.addEventListener("touchstart", beginReviewInkTouch, { passive: false });
+      target.addEventListener("touchmove", moveReviewInkTouch, { passive: false });
+      target.addEventListener("touchend", finishReviewInkTouch, { passive: false });
+      target.addEventListener("touchcancel", cancelReviewInkTouch, { passive: false });
     }
 
     function finishReviewStroke(event, cancelled) {
@@ -4351,22 +4343,9 @@
         return;
       }
       if (!reviewActiveStroke) return;
-      // 圖形與螢光筆不做續接，直接送出
-      if (reviewActiveStroke.tool === "shape" || reviewActiveStroke.tool === "highlighter") {
-        commitPendingReviewStroke();
-        state.reviewStrokes.push(reviewActiveStroke);
-        reviewActiveStroke = null;
-        drawReviewCanvas();
-        return;
-      }
-      // 手寫筆：暫存等待續接
-      commitPendingReviewStroke();
-      const lastPts = reviewActiveStroke.points;
-      reviewLastEndPoint = lastPts.length ? lastPts[lastPts.length - 1] : null;
-      reviewLastEndTime = Date.now();
-      reviewPendingStroke = reviewActiveStroke;
+      state.reviewStrokes.push(reviewActiveStroke);
       reviewActiveStroke = null;
-      reviewMergeTimer = setTimeout(commitPendingReviewStroke, STROKE_MERGE_MS);
+      drawReviewCanvas();
     }
 
     function cancelReviewStroke(event) {
@@ -4410,8 +4389,8 @@
     async function clearReviewStrokes() {
       const ok = await showModal("清除教師筆跡", "只會清除目前這張答案照片上的批改筆跡，確定嗎？", "confirm");
       if (!ok) return;
-      reviewPendingStroke = null;
-      if (reviewMergeTimer !== null) { clearTimeout(reviewMergeTimer); reviewMergeTimer = null; }
+      reviewActiveStroke = null;
+      reviewActivePointerId = null;
       state.reviewStrokes = [];
       drawReviewCanvas();
     }
@@ -4419,8 +4398,8 @@
     async function clearAllReviewStrokes() {
       const ok = await showModal("全部清除答案筆跡", "會清除目前這筆學生答案上的教師批改筆跡，確定嗎？", "confirm");
       if (!ok) return;
-      reviewPendingStroke = null;
-      if (reviewMergeTimer !== null) { clearTimeout(reviewMergeTimer); reviewMergeTimer = null; }
+      reviewActiveStroke = null;
+      reviewActivePointerId = null;
       state.reviewStrokes = [];
       drawReviewCanvas();
     }
@@ -4455,7 +4434,7 @@
     }
 
     async function saveReviewFeedback() {
-      commitPendingReviewStroke();
+      if (reviewActiveStroke) finishReviewStroke(null, true);
       const submission = state.reviewSubmission;
       if (!submission) return;
       const payload = { submissionId: submission.id, boardId: state.boardId, strokes: { photoIndex: state.reviewPhotoIndex, strokes: state.reviewStrokes }, comment: state.reviewComment };
