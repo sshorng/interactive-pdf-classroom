@@ -2,7 +2,7 @@
 
 ## 1. 現況盤點
 
-目前前端是單檔 `index.html`，採用 Vanilla JavaScript、Canvas、PDF.js、IndexedDB 及 GAS outbox。教師 PDF 使用 `inkCanvas`，學生答案批改使用 `reviewCanvas`，兩者都已具備 PointerEvent、Legacy TouchEvent、coalesced samples、增量繪製及取消事件處理。最新基線包含 commit `7ce4b81` 的自動續接嘗試，工作樹另有把輸入監聽提升至 stage 的未提交差異。
+目前前端是單檔 `index.html`，採用 Vanilla JavaScript、Canvas、PDF.js、IndexedDB 及 GAS outbox；後端 `Code.gs` 使用試算表與 Drive 保存資料。教師 PDF 使用 `inkCanvas`，學生答案批改使用 `reviewCanvas`，兩者都已具備 PointerEvent、Legacy TouchEvent、coalesced samples、增量繪製及取消事件處理。最新基線包含 commit `7ce4b81` 的自動續接嘗試，工作樹另有把輸入監聽提升至 stage 的未提交差異。
 
 本次症狀是連續線條尚可，但中文各筆之間稍微提筆後下一筆會遺失或停止。前幾輪只驗證合成 PointerEvent，沒有完整覆蓋原生事件目標、PointerEvent 與 TouchEvent 混送、遺失結束事件、批改手勢層及保存快照競速。GoodNotes 等級不能只由模擬器宣稱，必須把可驗收的事件行為寫死，實機結果另行標記。
 
@@ -13,6 +13,7 @@
 3. 繪製與保存：保留高頻取樣及即時預覽，確保短筆畫立即可見，保存快照不會被較舊非同步結果覆蓋。
 4. 課堂下拉重整：只在課堂 PDF 捲動區頂端接收手指下拉，觸發不破壞本機筆跡的課堂同步。
 5. 回歸閘門：先寫事件矩陣測試，再逐模組實作，最後跑既有契約、標點、語法、CDP 及部署核對。
+6. 多教材資料隔離：以 `materialId` 串接 PDF、問答區、教師筆跡、課堂狀態、學生作答、草稿及檔案索引；既有單 PDF 以 `M-{boardId}-legacy` 相容。
 
 依存方向為輸入路由到筆畫生命週期，再到繪製與保存；課堂下拉重整依賴手勢分流及保存狀態，最後由回歸閘門驗證全部模組。
 
@@ -34,7 +35,7 @@
 
 `beginReviewInk(event: InkPointerEvent): void`、`moveReviewInk(event: InkPointerEvent): void`、`finishReviewStroke(event: InkPointerEvent | null, cancelled: boolean): void`、`cancelReviewStroke(event: InkPointerEvent | null): void` 對批改 session 遵守同一生命週期契約。
 
-`saveInk` API payload 維持 `{ id, boardId, page, strokes }`，回傳既有 `{ ok, annotation }` 格式。不得修改 GAS API 簽名、試算表欄位或 Drive JSON 格式。
+`saveInk` API payload 在既有單一教材資料上維持 `{ id, boardId, page, strokes }`，多教材可附加 `materialId`，回傳維持 `{ ok, annotation }` 格式。不得改變既有 GAS 動作名稱與 Drive JSON 內容格式；多教材所需識別欄位依資料設計新增。
 
 ## 4. 資料流
 
@@ -48,7 +49,7 @@
 
 ## 5. 測試計畫
 
-先新增 `tests/ink-lifecycle-cdp.js` 及 `tests/classroom-pull-refresh-cdp.js`，在現行基線執行並記錄至少一項紅燈，再開始修改 `index.html`。筆畫測試必須涵蓋教師 stage 子元素落筆、教師短筆取消、教師遺失結束後重新落筆、批改圖片短筆取消、批改遺失結束後重新落筆，以及觸控筆事件不觸發批改雙擊縮放。下拉測試必須涵蓋課堂頂端手指下拉觸發同步、非頂端不觸發、觸控筆不觸發及本機筆跡保留。
+先新增 `tests/ink-lifecycle-cdp.js`、`tests/classroom-pull-refresh-cdp.js` 及 `tests/multi-material-cdp.js`，在現行基線執行並記錄至少一項紅燈，再開始修改實作。筆畫測試必須涵蓋教師 stage 子元素落筆、教師短筆取消、教師遺失結束後重新落筆、批改圖片短筆取消、批改遺失結束後重新落筆，以及觸控筆事件不觸發批改雙擊縮放。下拉測試必須涵蓋課堂頂端手指下拉觸發同步、非頂端不觸發、觸控筆不觸發及本機筆跡保留。多教材測試必須涵蓋教材切換、問答區過濾、筆跡鍵、草稿鍵及作答資料隔離。
 
 每完成一個模組就執行該測試。全部模組完成後執行既有 `pdfw-cdp-smoke.js`、`pdfw-ink-cdp.js`，再執行 HTML／JavaScript 語法、GAS 契約、全形標點及 `git diff --check`。測試結果必須列出實際輸出，不以理論通過替代。
 
@@ -57,3 +58,7 @@
 先建立並跑紅燈測試，接著修正輸入路由，再修正 session 清理，接著移除會把獨立中文字筆畫暫存合併的自動續接狀態，並補上保存快照的最新版本保護，最後加入課堂下拉重整。每一步完成定義是新增測試的對應斷言變綠，且既有測試沒有新增失敗。下拉重整只允許調用課堂同步函式，禁止重建版面上下文。
 
 本次 pre-mortem 已另存於 `premortem.md`。其防範條款會分別回填 coding 契約的驗收標準、介面契約及失敗協議。若三輪修正後實體 iPad 仍失敗，停止繼續猜測，改交付事件記錄版給實機測試或升級模型處理。
+
+## 7. 多教材擴充
+
+前端以 `state.activeMaterialId` 決定目前 PDF 與問答區，所有本機 IndexedDB 資料及 outbox payload 都必須帶有教材識別。GAS 端新增「課堂教材」資料表，並在舊版資料首次讀取時補建 legacy 教材與缺少的 `materialId`。課堂同步回傳目前教材清單、問答區、教師筆跡版本及各問答區作答數量；學生端依教師共享狀態跟隨教材、頁碼與縮放。

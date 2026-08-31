@@ -54,6 +54,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     const indicator = document.getElementById("pullRefreshIndicator");
     const hasBinding = typeof window.bindClassroomPullToRefresh === "function";
     const hasRefresh = typeof window.refreshClassroomView === "function";
+    const hasClassroomPolling = typeof window.pollClassroomView === "function";
     if (!scroll || !stage || !indicator) throw new Error("課堂下拉重整測試元件不存在。");
 
     if (state.pollTimer) {
@@ -122,13 +123,14 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     const page = Number(state.currentPage) || 1;
 
     const beforeCalls = { sync: syncCalls, submissions: submissionCalls };
-    state.teacherInk.set(page, [localInk]);
+     const inkKey = materialInkKey(state.activeMaterialId, page);
+     state.teacherInk.set(inkKey, [localInk]);
     setScrollTop(0);
     resetIndicator();
     if (hasBinding && hasRefresh) pull(2101);
     await wait(160);
     const topPullTriggeredOnce = syncCalls - beforeCalls.sync === 1 && submissionCalls - beforeCalls.submissions === 1;
-    const localInkPreserved = JSON.stringify(state.teacherInk.get(page) || []) === JSON.stringify([localInk]);
+     const localInkPreserved = JSON.stringify(state.teacherInk.get(inkKey) || []) === JSON.stringify([localInk]);
     const successIndicatorReset = !indicator.classList.contains("refreshing") && !indicator.classList.contains("visible");
 
     const callsAfterTopPull = syncCalls;
@@ -175,11 +177,17 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     await wait(160);
     const failureIndicatorReset = !indicator.classList.contains("refreshing") && !indicator.classList.contains("visible");
 
+    failSync = false;
+    const pollingBefore = { sync: syncCalls, submissions: submissionCalls };
+    if (hasClassroomPolling) await window.pollClassroomView();
+    const teacherPollingSync = syncCalls - pollingBefore.sync === 1;
+    const teacherPollingSubmissions = submissionCalls - pollingBefore.submissions === 1;
+
     window.loadClassroomSync = originalSync;
     window.loadReviewSubmissions = originalReviewSubmissions;
     if (originalClassroomSubmissions) window.loadClassroomSubmissions = originalClassroomSubmissions;
     else delete window.loadClassroomSubmissions;
-    return JSON.stringify({ hasBinding, hasRefresh, topPullTriggeredOnce, nonTopPullIgnored, stylusPullIgnored, activeStylusPullIgnored, localInkPreserved, successIndicatorReset, failureIndicatorReset });
+    return JSON.stringify({ hasBinding, hasRefresh, hasClassroomPolling, topPullTriggeredOnce, nonTopPullIgnored, stylusPullIgnored, activeStylusPullIgnored, localInkPreserved, successIndicatorReset, failureIndicatorReset, teacherPollingSync, teacherPollingSubmissions });
   })()`);
 
   const checks = JSON.parse(result);

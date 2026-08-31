@@ -586,6 +586,7 @@
     const MAX_IMAGE_COUNT = 2;
     const MAX_PDF_BYTES = 20 * 1024 * 1024;
     const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+    const CLASSROOM_POLL_INTERVAL = 3000;
     const INK_WIDTH_STEPS = [2, 4, 6, 8];
     const GAS_URL = resolveGasUrl();
 
@@ -602,6 +603,12 @@
       areas: [],
       pdf: null,
       pdfBytes: null,
+      materials: [],
+      activeMaterialId: "",
+      materialPdfCache: new Map(),
+      materialPdfBytesCache: new Map(),
+      studentMaterialPositions: new Map(),
+      materialLoadToken: 0,
       currentPage: 1,
       zoom: 1,
       renderToken: 0,
@@ -615,7 +622,8 @@
       activeStudentImages: [],
       activeDraftKey: "",
       teacherInk: new Map(),
-      teacherInkVersion: "",
+      teacherInkVersions: new Map(),
+      submissionCounts: new Map(),
       inkTool: "pen",
       previousInkTool: "pen",
       inkShape: "arrow",
@@ -623,6 +631,7 @@
       inkWidth: 2,
       inkSaveTimer: null,
       classroomStateTimer: null,
+      classroomStateRevision: 0,
       submissions: [],
       reviewLoading: false,
       reviewSubmission: null,
@@ -704,8 +713,94 @@
       return (hash >>> 0).toString(36);
     }
 
-    function submissionIdFor(boardId, areaId, nickname) {
-      return "S-" + hashString(boardId + "|" + areaId + "|" + nickname);
+    function legacyMaterialId(boardId) {
+      return "M-" + String(boardId || "") + "-legacy";
+    }
+
+    function isLegacyMaterialId(materialId, boardId) {
+      return String(materialId || "") === legacyMaterialId(boardId || state.boardId);
+    }
+
+    function normalizeMaterials(board, materials) {
+      const source = Array.isArray(materials) ? materials : (board && Array.isArray(board.materials) ? board.materials : []);
+      const rows = source.map(function (item, index) {
+        return Object.assign({}, item, {
+          id: String(item.id || legacyMaterialId(board && board.id)),
+          boardId: String(item.boardId || (board && board.id) || ""),
+          name: String(item.name || item.pdfFileName || "教材 " + (index + 1)),
+          order: Number(item.order) || index + 1,
+          status: item.status || "啟用"
+        });
+      }).filter(function (item) { return item.status !== "封存"; });
+      if (rows.length || !board || !board.pdfFileId) return rows.sort(function (a, b) { return a.order - b.order || a.id.localeCompare(b.id); });
+      return [{
+        id: legacyMaterialId(board.id),
+        boardId: board.id,
+        name: board.pdfFileName || "主要教材",
+        description: "既有單一 PDF 教材",
+        pdfFileId: board.pdfFileId,
+        pdfFileName: board.pdfFileName,
+        pdfMime: board.pdfMime || "application/pdf",
+        order: 1,
+        status: "啟用",
+        legacy: true,
+        createdAt: board.createdAt || "",
+        updatedAt: board.updatedAt || ""
+      }];
+    }
+
+    function normalizeAreas(areas, boardId) {
+      const legacyId = legacyMaterialId(boardId);
+      return (Array.isArray(areas) ? areas : []).map(function (area) {
+        return Object.assign({}, area, { materialId: String(area.materialId || legacyId) });
+      });
+    }
+
+    function activeMaterial() {
+      return state.materials.find(function (item) { return String(item.id) === String(state.activeMaterialId); }) || null;
+    }
+
+    function materialInkKey(materialId, page) {
+      return String(materialId || state.activeMaterialId || legacyMaterialId(state.boardId)) + "|" + (Number(page) || 1);
+    }
+
+    function teacherInkVersionFor(materialId) {
+      return String(state.teacherInkVersions.get(String(materialId || state.activeMaterialId || legacyMaterialId(state.boardId))) || "");
+    }
+
+    function studentDraftKey(boardId, materialId, areaId, nickname) {
+      const materialPart = isLegacyMaterialId(materialId, boardId) ? "" : "|" + String(materialId || "");
+      return "draft-" + boardId + materialPart + "-" + areaId + "-" + hashString(nickname || "guest");
+    }
+
+    function studentPositionStorageKey(boardId, materialId) {
+      return APP_KEY + "student_position_" + hashString(String(boardId || "") + "|" + String(materialId || ""));
+    }
+
+    function saveStudentMaterialPosition() {
+      if (state.view !== "student" || !state.boardId || !state.activeMaterialId) return;
+      state.studentMaterialPositions.set(String(state.activeMaterialId), { page: state.currentPage, zoom: state.zoom });
+      try {
+        localStorage.setItem(studentPositionStorageKey(state.boardId, state.activeMaterialId), JSON.stringify({ page: state.currentPage, zoom: state.zoom }));
+      } catch (error) {}
+    }
+
+    function readStudentMaterialPosition(materialId) {
+      const key = String(materialId || "");
+      if (state.studentMaterialPositions.has(key)) return state.studentMaterialPositions.get(key);
+      try {
+        const stored = JSON.parse(localStorage.getItem(studentPositionStorageKey(state.boardId, key)) || "null");
+        if (stored && typeof stored === "object") {
+          state.studentMaterialPositions.set(key, stored);
+          return stored;
+        }
+      } catch (error) {}
+      return { page: 1, zoom: 1 };
+    }
+
+    function submissionIdFor(boardId, areaId, nickname, materialId) {
+      const materialPart = isLegacyMaterialId(materialId, boardId) ? "" : "|" + String(materialId || "");
+      return "S-" + hashString(boardId + materialPart + "|" + areaId + "|" + nickname);
     }
 
     function showToast(message, type) {
@@ -1019,14 +1114,14 @@
     async function refreshClassroomView() {
       if (state.view !== "review" || !state.boardId) return;
       const localInk = new Map();
-      state.teacherInk.forEach(function (strokes, page) {
-        localInk.set(Number(page) || 1, JSON.parse(JSON.stringify(strokes || [])));
+      state.teacherInk.forEach(function (strokes, key) {
+        localInk.set(String(key), JSON.parse(JSON.stringify(strokes || [])));
       });
       const localRevisions = new Map(teacherInkRevision);
       await loadClassroomSync();
       await loadReviewSubmissions();
-      localRevisions.forEach(function (revision, page) {
-        if (teacherInkRevision.get(page) === revision) state.teacherInk.set(page, localInk.get(page) || []);
+      localRevisions.forEach(function (revision, key) {
+        if (teacherInkRevision.get(key) === revision) state.teacherInk.set(key, localInk.get(key) || []);
       });
       renderReviewAreaList();
       renderZones();
@@ -1218,17 +1313,36 @@
       });
     }
 
-    async function removeLocalSubmissionsForRemovedAreas(boardId, areas) {
+    async function removeLocalSubmissionsForRemovedAreas(boardId, areas, materialId) {
       const retainedAreas = {};
       (areas || []).forEach(function (area) { if (area && area.id) retainedAreas[String(area.id)] = true; });
-      const submissions = (await localAll("submissions")).filter(function (item) { return String(item.boardId) === String(boardId) && !retainedAreas[String(item.areaId)]; });
-      if (!submissions.length) return;
+      const board = await localGet("boards", boardId);
+      const areaMap = {};
+      normalizeAreas(board && board.areas || [], boardId).forEach(function (area) { areaMap[String(area.id)] = area; });
+      const targetMaterialId = materialId ? String(materialId) : "";
+      const submissions = (await localAll("submissions")).filter(function (item) {
+        if (String(item.boardId) !== String(boardId)) return false;
+        if (!retainedAreas[String(item.areaId)]) return true;
+        const area = areaMap[String(item.areaId)];
+        return Boolean(targetMaterialId) && String(item.materialId || (area && area.materialId) || legacyMaterialId(boardId)) === targetMaterialId;
+      });
       const targetSubmissions = {};
       const targetFiles = {};
       submissions.forEach(function (submission) {
         targetSubmissions[String(submission.id)] = true;
         (Array.isArray(submission.imageFileIds) ? submission.imageFileIds : []).forEach(function (fileId) { if (fileId) targetFiles[String(fileId)] = true; });
       });
+      for (const item of await localAll("outbox")) {
+        const payload = item.payload || {};
+        const submissionId = String(payload.id || payload.submissionId || "");
+        const payloadMaterialId = String(payload.materialId || legacyMaterialId(boardId));
+        const removed = String(payload.boardId) === String(boardId) && (targetSubmissions[submissionId] || (targetMaterialId && payloadMaterialId === targetMaterialId) || (payload.areaId && ["saveSubmission", "saveFeedback", "deleteSubmission"].indexOf(item.action) > -1 && !retainedAreas[String(payload.areaId)]));
+        if (removed) await localDelete("outbox", item.id);
+      }
+      for (const draft of await localAll("drafts")) {
+        if (String(draft.boardId) === String(boardId) && (!retainedAreas[String(draft.areaId || "")] || (targetMaterialId && String(draft.materialId || legacyMaterialId(boardId)) === targetMaterialId))) await localDelete("drafts", draft.id);
+      }
+      if (!submissions.length) return;
       (await localAll("files")).forEach(function (file) {
         if (targetSubmissions[String(file.submissionId)] || targetFiles[String(file.id)]) targetFiles[String(file.id)] = true;
       });
@@ -1236,13 +1350,23 @@
       for (const submission of submissions) await localDelete("submissions", submission.id);
     }
 
+    async function removeLocalMaterialFiles(boardId, materialId, material) {
+      const fileIds = new Set();
+      if (material && material.pdfFileId) fileIds.add(String(material.pdfFileId));
+      (await localAll("files")).forEach(function (file) {
+        if (String(file.boardId) === String(boardId) && String(file.materialId || "") === String(materialId)) fileIds.add(String(file.id));
+      });
+      for (const fileId of fileIds) await localDelete("files", fileId);
+    }
+
     async function removeLocalBoardData(boardId) {
       const key = String(boardId || "");
       const board = await localGet("boards", boardId);
+      const materialFileIds = new Set(normalizeMaterials(board, board && board.materials).map(function (item) { return String(item.pdfFileId || ""); }).filter(Boolean));
       const submissions = (await localAll("submissions")).filter(function (item) { return String(item.boardId) === key; });
       const submissionIds = new Set(submissions.map(function (item) { return String(item.id); }));
       const files = (await localAll("files")).filter(function (item) {
-        return String(item.boardId) === key || submissionIds.has(String(item.submissionId)) || (board && String(item.id) === String(board.pdfFileId));
+        return String(item.boardId) === key || submissionIds.has(String(item.submissionId)) || materialFileIds.has(String(item.id));
       });
       const outbox = (await localAll("outbox")).filter(function (item) {
         const payload = item.payload || {};
@@ -1325,14 +1449,35 @@
       return { name: file.name.replace(/\.[^.]+$/, "") + ".jpg", mime: "image/jpeg", data: dataUrl };
     }
 
-    async function localSaveFile(filePayload, purpose, boardId, submissionId) {
+    async function localSaveFile(filePayload, purpose, boardId, submissionId, materialId) {
       const id = "L-" + createId("F");
-      await localPut("files", { id: id, name: filePayload.name || "檔案", mime: filePayload.mime || "application/octet-stream", dataUrl: filePayload.data, purpose: purpose, boardId: boardId || "", submissionId: submissionId || "", createdAt: new Date().toISOString() });
+      await localPut("files", { id: id, name: filePayload.name || "檔案", mime: filePayload.mime || "application/octet-stream", dataUrl: filePayload.data, purpose: purpose, boardId: boardId || "", materialId: materialId || "", submissionId: submissionId || "", createdAt: new Date().toISOString() });
       return id;
     }
 
     function localInkVersion(items) {
       return (items || []).map(function (item) { return String(item.id || "") + ":" + String(item.updatedAt || ""); }).sort().join("|");
+    }
+
+    function localMaterialIdForArea(area, boardId) {
+      return String(area && area.materialId || legacyMaterialId(boardId));
+    }
+
+    async function localSubmissionCounts(boardId, materialId) {
+      const board = await localGet("boards", boardId);
+      if (!board) return {};
+      const areas = normalizeAreas(board.areas || [], board.id);
+      const areaMap = {};
+      areas.forEach(function (area) { areaMap[String(area.id)] = area; });
+      const counts = {};
+      (await localAll("submissions")).forEach(function (item) {
+        if (String(item.boardId) !== String(board.id)) return;
+        const area = areaMap[String(item.areaId)];
+        const itemMaterialId = String(item.materialId || (area && area.materialId) || legacyMaterialId(board.id));
+        if (!area || (materialId && itemMaterialId !== String(materialId))) return;
+        counts[String(item.areaId)] = (counts[String(item.areaId)] || 0) + 1;
+      });
+      return counts;
     }
 
     async function localRequest(action, payload) {
@@ -1342,12 +1487,15 @@
       if (action === "sheetUrl") return { ok: true, url: "" };
       if (action === "listInk") {
         const inkRows = (await localAll("ink")).filter(function (item) { return String(item.boardId) === String(data.boardId); });
-        return { ok: true, data: inkRows, inkVersion: localInkVersion(inkRows) };
+        const materialId = data.materialId ? String(data.materialId) : "";
+        const rows = inkRows.filter(function (item) { return !materialId || String(item.materialId || legacyMaterialId(data.boardId)) === materialId; }).map(function (item) { return Object.assign({}, item, { materialId: String(item.materialId || legacyMaterialId(data.boardId)) }); });
+        return { ok: true, data: rows, inkVersion: localInkVersion(rows) };
       }
       if (action === "saveInk") {
         const board = await localGet("boards", data.boardId);
         if (!board) throw new Error("找不到指定教材版面。");
-        const annotation = { id: data.id || "INK-" + board.id + "-" + (Number(data.page) || 1), boardId: board.id, page: Math.max(1, Number(data.page) || 1), strokes: Array.isArray(data.strokes) ? data.strokes : [], updatedAt: new Date().toISOString() };
+        const materialId = String(data.materialId || legacyMaterialId(board.id));
+        const annotation = { id: data.id || (isLegacyMaterialId(materialId, board.id) ? "INK-" + board.id + "-" + (Number(data.page) || 1) : "INK-" + board.id + "-" + materialId + "-" + (Number(data.page) || 1)), boardId: board.id, materialId: materialId, page: Math.max(1, Number(data.page) || 1), strokes: Array.isArray(data.strokes) ? data.strokes : [], updatedAt: new Date().toISOString() };
         await localPut("ink", annotation);
         return { ok: true, annotation: annotation };
       }
@@ -1356,14 +1504,21 @@
         if (!board) throw new Error("找不到指定教材版面。");
         const classroomState = await localGet("classroomState", "STATE-" + board.id);
         const inkRows = (await localAll("ink")).filter(function (item) { return String(item.boardId) === String(board.id); });
-        const inkVersion = localInkVersion(inkRows);
-        const inkChanged = String(data.inkVersion || "") !== inkVersion;
-        return { ok: true, state: classroomState || { id: "STATE-" + board.id, boardId: board.id, page: 1, zoom: 1, updatedAt: "" }, inkVersion: inkVersion, inkChanged: inkChanged, ink: inkChanged ? inkRows : null };
+        const stateMaterialId = String(classroomState && classroomState.materialId || legacyMaterialId(board.id));
+        const materialId = String(data.materialId || stateMaterialId);
+        const rows = inkRows.filter(function (item) { return String(item.materialId || legacyMaterialId(board.id)) === materialId; }).map(function (item) { return Object.assign({}, item, { materialId: String(item.materialId || legacyMaterialId(board.id)) }); });
+         const inkVersion = localInkVersion(rows);
+         const inkChanged = String(data.inkVersion || "") !== inkVersion;
+         const sharedState = classroomState || { id: "STATE-" + board.id, boardId: board.id, materialId: legacyMaterialId(board.id), page: 1, zoom: 1, updatedAt: "" };
+         const materials = normalizeMaterials(board, board.materials);
+         const publicState = Object.assign({}, sharedState, { materialId: String(sharedState.materialId || legacyMaterialId(board.id)) });
+         if (materials.length && !materials.some(function (item) { return String(item.id) === String(publicState.materialId); })) publicState.materialId = materials[0].id;
+         return { ok: true, state: publicState, inkVersion: inkVersion, inkChanged: inkChanged, ink: inkChanged ? rows : null, materialId: materialId, materials: materials, areas: normalizeAreas(board.areas || [], board.id), submissionCounts: await localSubmissionCounts(board.id, materialId) };
       }
       if (action === "saveClassroomState") {
         const board = await localGet("boards", data.boardId);
         if (!board) throw new Error("找不到指定教材版面。");
-        const classroomState = { id: "STATE-" + board.id, boardId: board.id, page: Math.max(1, Number(data.page) || 1), zoom: clamp(Number(data.zoom) || 1, .6, 2.2), updatedAt: new Date().toISOString() };
+        const classroomState = { id: "STATE-" + board.id, boardId: board.id, materialId: String(data.materialId || legacyMaterialId(board.id)), page: Math.max(1, Number(data.page) || 1), zoom: clamp(Number(data.zoom) || 1, .6, 2.2), updatedAt: new Date().toISOString() };
         await localPut("classroomState", classroomState);
         return { ok: true, state: classroomState };
       }
@@ -1371,7 +1526,7 @@
       if (action === "getBoard") {
         const board = await localGet("boards", data.boardId);
         if (!board || board.status === "封存") throw new Error("找不到指定教材版面。");
-        return { ok: true, board: board, areas: board.areas || [] };
+        return { ok: true, board: board, materials: board.materials || [], areas: board.areas || [] };
       }
       if (action === "getFile") {
         const file = await localGet("files", data.fileId);
@@ -1381,17 +1536,19 @@
         return { ok: true, fileId: file.id, name: file.name, mime: file.mime || parts.mime, base64: parts.base64 };
       }
       if (action === "createBoard") {
-        const board = { id: data.clientBoardId || createId("B"), name: String(data.name || "新教材").trim(), description: String(data.description || "").trim(), pdfFileId: "", pdfFileName: "", pdfMime: "", status: "啟用", areas: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+        const board = { id: data.clientBoardId || createId("B"), name: String(data.name || "新教材").trim(), description: String(data.description || "").trim(), pdfFileId: "", pdfFileName: "", pdfMime: "", materials: [], status: "啟用", areas: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
         if (!board.name) throw new Error("請填寫教材版面名稱。");
-        if (data.pdf && data.pdf.data) {
-          const fileId = await localSaveFile(data.pdf, "PDF教材", board.id, "");
+         if (data.pdf && data.pdf.data) {
+           const materialId = legacyMaterialId(board.id);
+           const fileId = await localSaveFile(data.pdf, "PDF教材", board.id, "", materialId);
           board.pdfFileId = fileId;
           board.pdfFileName = data.pdf.name || "教材.pdf";
           board.pdfMime = data.pdf.mime || "application/pdf";
+          board.materials = [{ id: materialId, boardId: board.id, name: data.pdf.name || "主要教材", description: "", pdfFileId: fileId, pdfFileName: board.pdfFileName, pdfMime: board.pdfMime, order: 1, status: "啟用", legacy: true, createdAt: board.createdAt, updatedAt: board.updatedAt }];
         }
-        board.areas = Array.isArray(data.areas) ? data.areas : [];
+        board.areas = normalizeAreas(Array.isArray(data.areas) ? data.areas : [], board.id);
         await localPut("boards", board);
-        return { ok: true, board: board, areas: board.areas };
+        return { ok: true, board: board, materials: board.materials, areas: board.areas };
       }
       if (action === "updateBoard") {
         const board = await localGet("boards", data.boardId);
@@ -1399,18 +1556,102 @@
         board.name = String(data.name === undefined ? board.name : data.name).trim();
         board.description = String(data.description === undefined ? board.description : data.description).trim();
         if (data.pdf && data.pdf.data) {
-          const fileId = await localSaveFile(data.pdf, "PDF教材", board.id, "");
-          board.pdfFileId = fileId;
-          board.pdfFileName = data.pdf.name || "教材.pdf";
-          board.pdfMime = data.pdf.mime || "application/pdf";
+          const materialId = String(data.materialId || legacyMaterialId(board.id));
+           const fileId = await localSaveFile(data.pdf, "PDF教材", board.id, "", materialId);
+           board.materials = normalizeMaterials(board, board.materials);
+           let material = board.materials.find(function (item) { return String(item.id) === materialId; });
+           if (material) {
+             material.pdfFileId = fileId;
+             material.pdfFileName = data.pdf.name || "教材.pdf";
+             material.pdfMime = data.pdf.mime || "application/pdf";
+             material.updatedAt = new Date().toISOString();
+           } else if (isLegacyMaterialId(materialId, board.id)) {
+             const now = new Date().toISOString();
+             material = { id: materialId, boardId: board.id, name: data.pdf.name || "主要教材", description: "", pdfFileId: fileId, pdfFileName: data.pdf.name || "教材.pdf", pdfMime: data.pdf.mime || "application/pdf", order: 1, status: "啟用", legacy: true, createdAt: now, updatedAt: now };
+             board.materials.push(material);
+           }
+          if (isLegacyMaterialId(materialId, board.id)) {
+            board.pdfFileId = fileId;
+            board.pdfFileName = data.pdf.name || "教材.pdf";
+            board.pdfMime = data.pdf.mime || "application/pdf";
+          }
         }
         if (data.areas !== undefined) {
-          await removeLocalSubmissionsForRemovedAreas(board.id, data.areas);
-          board.areas = data.areas;
+          const areas = normalizeAreas(data.areas, board.id);
+          await removeLocalSubmissionsForRemovedAreas(board.id, areas);
+          board.areas = areas;
         }
         board.updatedAt = new Date().toISOString();
         await localPut("boards", board);
-        return { ok: true, board: board, areas: board.areas || [] };
+        return { ok: true, board: board, materials: board.materials || [], areas: board.areas || [] };
+      }
+      if (action === "createMaterial") {
+        const board = await localGet("boards", data.boardId);
+        if (!board) throw new Error("找不到指定教材版面。");
+        const name = String(data.name || "").trim();
+        if (!name) throw new Error("請填寫教材名稱。");
+        if (!data.pdf || !data.pdf.data) throw new Error("請選擇 PDF 教材。");
+        board.materials = normalizeMaterials(board, board.materials);
+         const materialId = String(data.id || createId("M"));
+         const fileId = await localSaveFile(data.pdf, "PDF教材", board.id, "", materialId);
+        const now = new Date().toISOString();
+        const material = { id: materialId, boardId: board.id, name: name, description: String(data.description || "").trim(), pdfFileId: fileId, pdfFileName: data.pdf.name || "教材.pdf", pdfMime: data.pdf.mime || "application/pdf", order: board.materials.length + 1, status: "啟用", createdAt: now, updatedAt: now };
+        board.materials.push(material);
+        board.updatedAt = now;
+        await localPut("boards", board);
+         return { ok: true, material: material, materials: board.materials, areas: board.areas || [], board: board };
+      }
+      if (action === "updateMaterial") {
+        const board = await localGet("boards", data.boardId);
+        if (!board) throw new Error("找不到指定教材版面。");
+        board.materials = normalizeMaterials(board, board.materials);
+        const materialId = String(data.materialId || "");
+        const material = board.materials.find(function (item) { return String(item.id) === materialId; });
+        if (!material) throw new Error("找不到指定課堂教材。");
+        if (data.name !== undefined) material.name = String(data.name || "").trim();
+        if (!material.name) throw new Error("教材名稱不可為空白。");
+        if (data.description !== undefined) material.description = String(data.description || "").trim();
+        if (data.pdf && data.pdf.data) {
+           material.pdfFileId = await localSaveFile(data.pdf, "PDF教材", board.id, "", materialId);
+          material.pdfFileName = data.pdf.name || "教材.pdf";
+          material.pdfMime = data.pdf.mime || "application/pdf";
+        }
+        material.updatedAt = new Date().toISOString();
+        if (isLegacyMaterialId(materialId, board.id)) {
+          board.pdfFileId = material.pdfFileId;
+          board.pdfFileName = material.pdfFileName;
+          board.pdfMime = material.pdfMime;
+        }
+        board.updatedAt = material.updatedAt;
+        await localPut("boards", board);
+         return { ok: true, material: material, materials: board.materials, areas: board.areas || [], board: board };
+      }
+      if (action === "deleteMaterial") {
+        const board = await localGet("boards", data.boardId);
+        if (!board) throw new Error("找不到指定教材版面。");
+        board.materials = normalizeMaterials(board, board.materials);
+         if (board.materials.length <= 1) throw new Error("至少要保留一份課堂教材。");
+         const materialId = String(data.materialId || "");
+         const removedMaterial = board.materials.find(function (item) { return String(item.id) === materialId; });
+         if (!removedMaterial) throw new Error("找不到指定課堂教材。");
+        const removedAreas = (board.areas || []).filter(function (area) { return localMaterialIdForArea(area, board.id) === materialId; });
+          await removeLocalSubmissionsForRemovedAreas(board.id, (board.areas || []).filter(function (area) { return removedAreas.indexOf(area) < 0; }), materialId);
+        board.areas = (board.areas || []).filter(function (area) { return localMaterialIdForArea(area, board.id) !== materialId; });
+         const inkRows = (await localAll("ink")).filter(function (item) { return String(item.boardId) === String(board.id) && String(item.materialId || legacyMaterialId(board.id)) === materialId; });
+         for (const item of inkRows) await localDelete("ink", item.id);
+         for (const item of await localAll("outbox")) {
+           const payload = item.payload || {};
+           if (item.action === "saveInk" && String(payload.boardId) === String(board.id) && String(payload.materialId || legacyMaterialId(board.id)) === materialId) await localDelete("outbox", item.id);
+         }
+         await removeLocalMaterialFiles(board.id, materialId, removedMaterial);
+         for (const draft of await localAll("drafts")) {
+           if (String(draft.boardId) === String(board.id) && String(draft.materialId || "") === materialId) await localDelete("drafts", draft.id);
+         }
+        board.materials = board.materials.filter(function (item) { return String(item.id) !== materialId; });
+        board.materials.forEach(function (item, index) { item.order = index + 1; });
+        board.updatedAt = new Date().toISOString();
+        await localPut("boards", board);
+         return { ok: true, materialId: materialId, materials: board.materials, areas: board.areas || [], board: board };
       }
       if (action === "archiveBoard") {
         const board = await localGet("boards", data.boardId);
@@ -1425,22 +1666,33 @@
       if (action === "saveSubmission") {
         const board = await localGet("boards", data.boardId);
         if (!board) throw new Error("找不到指定教材版面。");
+        const area = normalizeAreas(board.areas || [], board.id).find(function (item) { return String(item.id) === String(data.areaId); });
+        if (!area) throw new Error("找不到指定問答區。");
+        const materialId = localMaterialIdForArea(area, board.id);
         const existing = await localGet("submissions", data.id);
         const imageIds = Array.isArray(data.keepImageFileIds) ? data.keepImageFileIds.slice(0, MAX_IMAGE_COUNT) : [];
         const imageNames = Array.isArray(data.keepImageFileNames) ? data.keepImageFileNames.slice(0, MAX_IMAGE_COUNT) : [];
         for (const image of Array.isArray(data.images) ? data.images.slice(0, MAX_IMAGE_COUNT) : []) {
-          const fileId = await localSaveFile(image, "學生答案照片", board.id, data.id);
+          const fileId = await localSaveFile(image, "學生答案照片", board.id, data.id, materialId);
           imageIds.push(fileId);
           imageNames.push(image.name || "答案照片.jpg");
         }
         if (!String(data.text || "").trim() && !imageIds.length) throw new Error("請輸入文字或上傳至少一張照片。");
-        const submission = { id: data.id || createId("S"), boardId: board.id, areaId: data.areaId, nickname: String(data.nickname || "").trim(), text: String(data.text || "").trim(), imageFileIds: imageIds.slice(0, MAX_IMAGE_COUNT), imageFileNames: imageNames.slice(0, MAX_IMAGE_COUNT), teacherStrokes: {}, teacherComment: "", status: "待批改", clientId: data.clientId || "", createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+        const submission = { id: data.id || createId("S"), boardId: board.id, materialId: materialId, areaId: data.areaId, nickname: String(data.nickname || "").trim(), text: String(data.text || "").trim(), imageFileIds: imageIds.slice(0, MAX_IMAGE_COUNT), imageFileNames: imageNames.slice(0, MAX_IMAGE_COUNT), teacherStrokes: {}, teacherComment: "", status: "待批改", clientId: data.clientId || "", createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
         if (!submission.nickname) throw new Error("請先輸入暱稱。");
         await localPut("submissions", submission);
         return { ok: true, submission: submission };
       }
       if (action === "listSubmissions") {
-        const rows = (await localAll("submissions")).filter(function (item) { return String(item.boardId) === String(data.boardId) && (data.role === "teacher" || (data.nickname && item.nickname === data.nickname)); });
+        const board = await localGet("boards", data.boardId);
+        const materialId = data.materialId ? String(data.materialId) : "";
+        const areaMap = {};
+        normalizeAreas(board && board.areas || [], data.boardId).forEach(function (area) { areaMap[String(area.id)] = area; });
+        const rows = (await localAll("submissions")).filter(function (item) {
+          if (String(item.boardId) !== String(data.boardId)) return false;
+          if (materialId && String(item.materialId || (areaMap[String(item.areaId)] && areaMap[String(item.areaId)].materialId) || legacyMaterialId(data.boardId)) !== materialId) return false;
+          return data.role === "teacher" || (data.nickname && item.nickname === data.nickname);
+        });
         rows.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
         return { ok: true, data: rows };
       }
@@ -1519,6 +1771,10 @@
       return gasPost(action, payload || {});
     }
 
+    function isBoardMutationAction(action) {
+      return ["createBoard", "updateBoard", "archiveBoard", "deleteBoard", "createMaterial", "updateMaterial", "deleteMaterial"].indexOf(action) > -1;
+    }
+
     async function managerApi(action, payload) {
       const data = Object.assign({}, payload || {}, state.adminToken ? { adminToken: state.adminToken } : {});
       try {
@@ -1549,7 +1805,7 @@
       return items.some(function (item) {
         const payload = item.payload || {};
         const id = payload.boardId || payload.clientBoardId;
-        return String(id || "") === String(boardId) && ["createBoard", "updateBoard", "archiveBoard", "deleteBoard"].indexOf(item.action) > -1;
+        return String(id || "") === String(boardId) && isBoardMutationAction(item.action);
       });
     }
 
@@ -1571,7 +1827,7 @@
       pending.forEach(function (item) {
         const payload = item.payload || {};
         const id = payload.boardId || payload.clientBoardId;
-        if (id && ["createBoard", "updateBoard", "archiveBoard", "deleteBoard"].indexOf(item.action) > -1) pendingByBoard.set(String(id), item.action);
+        if (id && isBoardMutationAction(item.action)) pendingByBoard.set(String(id), item.action);
       });
       const localBoards = await localAll("boards");
       localBoards.forEach(function (board) {
@@ -1591,14 +1847,14 @@
     async function pruneStaleLocalBoards(remoteBoards) {
       const remoteIds = new Set((remoteBoards || []).map(function (board) { return String(board.id); }));
       const pendingBoardIds = new Set((await localAll("outbox")).filter(function (item) {
-        return ["createBoard", "updateBoard", "archiveBoard", "deleteBoard"].indexOf(item.action) > -1;
+        return isBoardMutationAction(item.action);
       }).map(function (item) { const payload = item.payload || {}; return String(payload.boardId || payload.clientBoardId || ""); }));
       for (const board of await localAll("boards")) {
         if (!remoteIds.has(String(board.id)) && !pendingBoardIds.has(String(board.id))) await localDelete("boards", board.id);
       }
     }
 
-    async function mergePendingSubmissions(remoteRows, boardId, nickname) {
+    async function mergePendingSubmissions(remoteRows, boardId, nickname, materialId) {
       const pendingIds = new Set((await localAll("outbox")).filter(function (item) {
         return ["saveSubmission", "saveFeedback"].indexOf(item.action) > -1;
       }).map(function (item) { return String((item.payload || {}).id || (item.payload || {}).submissionId || ""); }));
@@ -1609,17 +1865,20 @@
       (await localAll("submissions")).forEach(function (item) {
         if (deletedIds.has(String(item.id))) return;
         if (String(item.boardId) !== String(boardId) || (nickname && String(item.nickname) !== String(nickname))) return;
+        if (materialId && String(item.materialId || legacyMaterialId(boardId)) !== String(materialId)) return;
         const remote = rows.get(String(item.id));
         if (pendingIds.has(String(item.id)) || !remote || (item.updatedAt && remote.updatedAt && String(item.updatedAt) > String(remote.updatedAt))) rows.set(String(item.id), item);
       });
       return Array.from(rows.values());
     }
 
-    async function pendingInkRows(boardId) {
+    async function pendingInkRows(boardId, materialId) {
       const pendingIds = new Set((await localAll("outbox")).filter(function (item) {
         return item.action === "saveInk" && String((item.payload || {}).boardId) === String(boardId);
       }).map(function (item) { return String((item.payload || {}).id || ""); }));
-      return (await localAll("ink")).filter(function (item) { return String(item.boardId) === String(boardId) && pendingIds.has(String(item.id)); });
+      return (await localAll("ink")).filter(function (item) {
+        return String(item.boardId) === String(boardId) && pendingIds.has(String(item.id)) && (!materialId || String(item.materialId || legacyMaterialId(boardId)) === String(materialId));
+      });
     }
 
     async function pendingClassroomState(boardId) {
@@ -1647,33 +1906,61 @@
       return { ok: true, fileId: file.id, name: file.name, mime: file.mime || parts.mime, base64: parts.base64 };
     }
 
-    async function getFileWithCache(fileId, boardId) {
+    async function getFileWithCache(fileId, boardId, materialId) {
       if (!fileId) return null;
-      const cached = cachedFileResult(await localGet("files", fileId));
+      const cachedFile = await localGet("files", fileId);
+      const cachedMatchesMaterial = !materialId || !cachedFile || !cachedFile.materialId || String(cachedFile.materialId) === String(materialId);
+      const cached = cachedMatchesMaterial ? cachedFileResult(cachedFile) : null;
       if (cached) return cached;
-      const result = await api("getFile", { fileId: fileId, boardId: boardId });
+      const result = await api("getFile", { fileId: fileId, boardId: boardId, materialId: materialId || "" });
       try {
-        await localPut("files", { id: result.fileId || fileId, name: result.name || "檔案", mime: result.mime || "application/octet-stream", base64: result.base64 || "", size: result.size || 0, boardId: boardId || "", cachedAt: new Date().toISOString() });
+        await localPut("files", { id: result.fileId || fileId, name: result.name || "檔案", mime: result.mime || "application/octet-stream", base64: result.base64 || "", size: result.size || 0, boardId: boardId || "", materialId: materialId || "", cachedAt: new Date().toISOString() });
       } catch (error) {
         // 本機快取失敗時仍保留本次網路結果。
       }
       return result;
     }
 
-    async function fetchFileData(fileId, boardId) {
+    async function fetchFileData(fileId, boardId, materialId) {
       if (!fileId) return null;
       if (state.imageCache.has(fileId)) return state.imageCache.get(fileId);
-      const result = await getFileWithCache(fileId, boardId);
+      const result = await getFileWithCache(fileId, boardId, materialId);
       const dataUrl = base64ToDataUrl(result.base64, result.mime);
       state.imageCache.set(fileId, dataUrl);
       return dataUrl;
+    }
+
+    async function loadMaterialPdf(materialId) {
+      const material = state.materials.find(function (item) { return String(item.id) === String(materialId); });
+      const token = ++state.materialLoadToken;
+      if (!material || !material.pdfFileId) {
+        if (token === state.materialLoadToken) {
+          state.pdf = null;
+          state.pdfBytes = null;
+        }
+        return null;
+      }
+      let pdf = state.materialPdfCache.get(String(material.id));
+      let bytes = state.materialPdfBytesCache.get(String(material.id));
+      if (!pdf) {
+        if (!window.pdfjsLib) throw new Error("PDF 引擎尚未載入，請確認網路連線後重試。");
+        const file = await getFileWithCache(material.pdfFileId, state.board && state.board.id, material.id);
+        bytes = base64ToBytes(file.base64);
+        pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+        state.materialPdfCache.set(String(material.id), pdf);
+        state.materialPdfBytesCache.set(String(material.id), bytes);
+      }
+      if (token !== state.materialLoadToken) return null;
+      state.pdf = pdf;
+      state.pdfBytes = bytes;
+      return pdf;
     }
 
     async function loadBoardContext(boardId) {
       const cachedBoard = await localGet("boards", boardId);
       let result;
       if (cachedBoard) {
-        result = { board: cachedBoard, areas: cachedBoard.areas || [] };
+        result = { board: cachedBoard, materials: cachedBoard.materials || [], areas: cachedBoard.areas || [] };
         if (!state.demo && navigator.onLine) {
           api("getBoard", { boardId: boardId }).then(async function (remote) {
             if (remote && remote.board) {
@@ -1681,8 +1968,23 @@
               if (isNewer) {
                 await cacheBoardLocally(remote.board, remote.areas || []);
                 if (String(state.boardId) === String(boardId)) {
+                  const previousActiveMaterial = activeMaterial();
+                  const previousActiveMaterialId = String(state.activeMaterialId || "");
                   state.board = remote.board;
-                  state.areas = Array.isArray(remote.areas) ? remote.areas : [];
+                  state.materials = normalizeMaterials(remote.board, remote.materials || remote.board.materials);
+                  state.areas = normalizeAreas(remote.areas || [], boardId);
+                  if (!state.materials.some(function (item) { return String(item.id) === String(state.activeMaterialId); })) state.activeMaterialId = state.materials[0] ? state.materials[0].id : "";
+                  const nextActiveMaterial = activeMaterial();
+                  const activeMaterialChanged = previousActiveMaterialId !== String(state.activeMaterialId || "");
+                  const activePdfChanged = Boolean(previousActiveMaterial && nextActiveMaterial && String(previousActiveMaterial.pdfFileId || "") !== String(nextActiveMaterial.pdfFileId || ""));
+                  if (activeMaterialChanged || activePdfChanged) {
+                    state.materialPdfCache.delete(String(state.activeMaterialId || ""));
+                    state.materialPdfBytesCache.delete(String(state.activeMaterialId || ""));
+                    await loadMaterialPdf(state.activeMaterialId);
+                    state.currentPage = state.pdf ? clamp(state.currentPage, 1, state.pdf.numPages) : 1;
+                    await renderPdfPage();
+                  }
+                  renderMaterialControls();
                   renderZones();
                   renderReviewAreaList();
                 }
@@ -1700,22 +2002,34 @@
       }
       state.board = result.board;
       state.boardId = result.board.id;
-      state.areas = Array.isArray(result.areas) ? result.areas : [];
+      state.materials = normalizeMaterials(state.board, result.materials || state.board.materials);
+      state.areas = normalizeAreas(result.areas || state.board.areas || [], state.board.id);
+      const storedMaterialId = state.view === "student" ? localStorage.getItem(APP_KEY + "student_material_" + state.board.id) : "";
+      state.activeMaterialId = state.materials.some(function (item) { return String(item.id) === String(storedMaterialId); }) ? storedMaterialId : (state.materials[0] ? state.materials[0].id : "");
       state.pdf = null;
       state.pdfBytes = null;
+      state.materialPdfCache.clear();
+      state.materialPdfBytesCache.clear();
+      state.studentMaterialPositions.clear();
       window.clearTimeout(state.inkSaveTimer);
       state.inkSaveTimer = null;
+      window.clearTimeout(state.classroomStateTimer);
+      state.classroomStateTimer = null;
       state.teacherInk.clear();
       teacherInkRevision.clear();
       teacherInkSaveChains.clear();
-      state.teacherInkVersion = "";
+      state.teacherInkVersions.clear();
+      state.submissionCounts.clear();
+      state.classroomStateRevision = 0;
       state.currentPage = 1;
       state.zoom = 1;
-      if (state.board.pdfFileId) {
-        if (!window.pdfjsLib) throw new Error("PDF 引擎尚未載入，請確認網路連線後重試。");
-        const file = await getFileWithCache(state.board.pdfFileId, state.board.id);
-        state.pdfBytes = base64ToBytes(file.base64);
-        state.pdf = await window.pdfjsLib.getDocument({ data: state.pdfBytes }).promise;
+      if (state.activeMaterialId) {
+        await loadMaterialPdf(state.activeMaterialId);
+        if (state.view === "student") {
+          const position = readStudentMaterialPosition(state.activeMaterialId);
+          state.currentPage = state.pdf ? clamp(Number(position.page) || 1, 1, state.pdf.numPages) : 1;
+          state.zoom = clamp(Number(position.zoom) || 1, .5, 3.0);
+        }
       }
       return state.board;
     }
@@ -1854,8 +2168,9 @@
     }
 
     function bindEditorEvents() {
-      setupTeacherPdfWorkspace(false);
-      document.getElementById("backManagerButton").addEventListener("click", function () { goView("manager"); });
+       setupTeacherPdfWorkspace(false);
+       ensureMaterialControls("editor");
+       document.getElementById("backManagerButton").addEventListener("click", function () { goView("manager"); });
       document.getElementById("saveBoardButton").addEventListener("click", saveEditorBoard);
       document.getElementById("prevPageButton").addEventListener("click", function () { changePage(-1); });
       document.getElementById("nextPageButton").addEventListener("click", function () { changePage(1); });
@@ -2096,81 +2411,112 @@
       if (status) status.textContent = message;
     }
 
-      async function loadTeacherInk() {
-       state.teacherInk.clear();
-       teacherInkRevision.clear();
-       teacherInkSaveChains.clear();
-      let result;
-      try {
-        result = await managerApi("listInk", { boardId: state.boardId });
-      } catch (error) {
-        if (!error.network) throw error;
-        result = await localRequest("listInk", { boardId: state.boardId });
-      }
-      const rows = new Map((result.data || []).map(function (item) { return [String(item.id), item]; }));
-      (await pendingInkRows(state.boardId)).forEach(function (item) { rows.set(String(item.id), item); });
-      state.teacherInk.clear();
-      Array.from(rows.values()).forEach(function (item) {
-        state.teacherInk.set(Number(item.page) || 1, Array.isArray(item.strokes) ? item.strokes : []);
-      });
-      state.teacherInkVersion = String(result.inkVersion || "");
-      setInkStatus("手寫已載入");
+      async function loadTeacherInk(materialId) {
+       const targetMaterialId = String(materialId || state.activeMaterialId || legacyMaterialId(state.boardId));
+       if (!materialId) {
+         state.teacherInk.clear();
+         state.teacherInkVersions.clear();
+         teacherInkRevision.clear();
+         teacherInkSaveChains.clear();
+       } else {
+         const prefix = targetMaterialId + "|";
+         Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
+       }
+       let result;
+       try {
+         result = await managerApi("listInk", { boardId: state.boardId, materialId: targetMaterialId });
+       } catch (error) {
+         if (!error.network) throw error;
+         result = await localRequest("listInk", { boardId: state.boardId, materialId: targetMaterialId });
+       }
+       const rows = new Map((result.data || []).map(function (item) { return [String(item.id), item]; }));
+       (await pendingInkRows(state.boardId, targetMaterialId)).forEach(function (item) { rows.set(String(item.id), item); });
+       const prefix = targetMaterialId + "|";
+       Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
+       Array.from(rows.values()).forEach(function (item) {
+         const itemMaterialId = String(item.materialId || targetMaterialId);
+         state.teacherInk.set(materialInkKey(itemMaterialId, Number(item.page) || 1), Array.isArray(item.strokes) ? item.strokes : []);
+       });
+       state.teacherInkVersions.set(targetMaterialId, String(result.inkVersion || ""));
+       setInkStatus("手寫已載入");
+     }
+
+    function teacherInkForPage(page, materialId) {
+      return state.teacherInk.get(materialInkKey(materialId, page)) || [];
     }
 
-    function teacherInkForPage(page) {
-      return state.teacherInk.get(Number(page)) || [];
-    }
-
-     function markTeacherInkChanged(page) {
-       const key = Number(page) || 1;
+     function markTeacherInkChanged(page, materialId) {
+       const key = materialInkKey(materialId, page);
        teacherInkRevision.set(key, (teacherInkRevision.get(key) || 0) + 1);
        return teacherInkRevision.get(key);
      }
 
+     function teacherInkId(boardId, materialId, page) {
+       const targetMaterialId = String(materialId || legacyMaterialId(boardId));
+       return isLegacyMaterialId(targetMaterialId, boardId) ? "INK-" + boardId + "-" + (Number(page) || 1) : "INK-" + boardId + "-" + targetMaterialId + "-" + (Number(page) || 1);
+     }
+
      function scheduleTeacherInkSave() {
        const page = Number(state.currentPage) || 1;
+       const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
        const boardId = state.board ? String(state.board.id) : "";
-       markTeacherInkChanged(page);
+       markTeacherInkChanged(page, materialId);
        window.clearTimeout(state.inkSaveTimer);
-       state.inkSaveTimer = window.setTimeout(function () { persistTeacherInk(page, boardId); }, 450);
+       state.inkSaveTimer = window.setTimeout(function () { persistTeacherInk(page, boardId, materialId); }, 450);
        setInkStatus("手寫暫存中");
      }
 
-     function persistTeacherInk(page, boardId) {
+     function persistTeacherInk(page, boardId, materialId) {
        const key = Number(page) || 1;
        const targetBoardId = String(boardId || (state.board && state.board.id) || "");
+       const targetMaterialId = String(materialId || state.activeMaterialId || legacyMaterialId(targetBoardId));
+       const storageKey = materialInkKey(targetMaterialId, key);
        if (!targetBoardId) return Promise.resolve();
-       const revision = teacherInkRevision.get(key) || 0;
-       const previous = teacherInkSaveChains.get(key) || Promise.resolve();
+       const revision = teacherInkRevision.get(storageKey) || 0;
+       const previous = teacherInkSaveChains.get(storageKey) || Promise.resolve();
        const task = previous.catch(function () {}).then(async function () {
-         const strokes = JSON.parse(JSON.stringify(teacherInkForPage(key)));
-         const payload = { id: "INK-" + targetBoardId + "-" + key, boardId: targetBoardId, page: key, strokes: strokes };
+         const strokes = JSON.parse(JSON.stringify(teacherInkForPage(key, targetMaterialId)));
+         const payload = { id: teacherInkId(targetBoardId, targetMaterialId, key), boardId: targetBoardId, materialId: targetMaterialId, page: key, strokes: strokes };
          try {
            const result = await commitLocalMutation("saveInk", payload);
-           const isCurrent = teacherInkRevision.get(key) === revision && state.board && String(state.board.id) === targetBoardId;
+           const isCurrent = teacherInkRevision.get(storageKey) === revision && state.board && String(state.board.id) === targetBoardId;
            if (isCurrent) {
-             if (result.annotation && Number(key) === Number(state.currentPage)) state.teacherInk.set(key, result.annotation.strokes || strokes);
-             teacherInkRevision.delete(key);
+             if (result.annotation && targetMaterialId === String(state.activeMaterialId) && Number(key) === Number(state.currentPage)) state.teacherInk.set(storageKey, result.annotation.strokes || strokes);
+             teacherInkRevision.delete(storageKey);
              setInkStatus(state.demo ? "手寫已保存" : "手寫已本機保存，背景同步中");
            }
          } catch (error) {
-           const isCurrent = teacherInkRevision.get(key) === revision && state.board && String(state.board.id) === targetBoardId;
+           const isCurrent = teacherInkRevision.get(storageKey) === revision && state.board && String(state.board.id) === targetBoardId;
            if (!isCurrent) return;
            setInkStatus("手寫本機保存失敗");
            await showModal("手寫保存失敗", error.message || "請稍後再試。", "error");
          }
        });
        let tracked = task.finally(function () {
-         if (teacherInkSaveChains.get(key) === tracked) teacherInkSaveChains.delete(key);
+         if (teacherInkSaveChains.get(storageKey) === tracked) teacherInkSaveChains.delete(storageKey);
        });
-       teacherInkSaveChains.set(key, tracked);
+       teacherInkSaveChains.set(storageKey, tracked);
        return tracked;
+     }
+
+     function applySubmissionCounts(counts) {
+       state.submissionCounts.clear();
+       Object.keys(counts || {}).forEach(function (areaId) { state.submissionCounts.set(String(areaId), Number(counts[areaId]) || 0); });
      }
 
     async function loadClassroomSync() {
       if (!state.boardId) return;
+      const viewAtStart = state.view;
+      const requestedMaterialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
+      const localInk = new Map();
+      state.teacherInk.forEach(function (strokes, key) { if (String(key).indexOf(requestedMaterialId + "|") === 0) localInk.set(String(key), JSON.parse(JSON.stringify(strokes || []))); });
+      const localRevisions = new Map();
+      teacherInkRevision.forEach(function (revision, key) { if (String(key).indexOf(requestedMaterialId + "|") === 0) localRevisions.set(String(key), revision); });
+      const localStateRevision = state.classroomStateRevision;
+      const localPage = state.currentPage;
+      const localZoom = state.zoom;
       let result;
-      const syncPayload = { boardId: state.boardId, inkVersion: state.teacherInkVersion };
+      const syncPayload = { boardId: state.boardId, materialId: requestedMaterialId, inkVersion: teacherInkVersionFor(requestedMaterialId) };
       try {
         result = state.demo ? await localRequest("classroomSync", syncPayload) : await gasGet("classroomSync", syncPayload);
       } catch (error) {
@@ -2182,7 +2528,27 @@
           return;
         }
       }
-      const pendingInk = await pendingInkRows(state.boardId);
+      if (viewAtStart !== state.view || String(state.boardId) !== String(syncPayload.boardId)) return;
+      const hasPendingCatalogMutation = await hasPendingBoardMutation(state.boardId);
+      const previousActiveMaterial = activeMaterial();
+      let activeMaterialMissing = false;
+      let activeMaterialPdfChanged = false;
+      if (Array.isArray(result.materials) && !hasPendingCatalogMutation) {
+        const nextMaterials = normalizeMaterials(state.board, result.materials);
+        const nextActiveMaterial = nextMaterials.find(function (item) { return String(item.id) === String(requestedMaterialId); });
+        activeMaterialPdfChanged = Boolean(previousActiveMaterial && nextActiveMaterial && String(previousActiveMaterial.pdfFileId || "") !== String(nextActiveMaterial.pdfFileId || ""));
+        state.materials = nextMaterials;
+        if (state.board) state.board.materials = state.materials;
+        activeMaterialMissing = Boolean(state.activeMaterialId && !state.materials.some(function (item) { return String(item.id) === String(state.activeMaterialId); }));
+      }
+      if (Array.isArray(result.areas) && !hasPendingCatalogMutation) state.areas = normalizeAreas(result.areas, state.boardId);
+      if (activeMaterialPdfChanged) {
+        state.materialPdfCache.delete(requestedMaterialId);
+        state.materialPdfBytesCache.delete(requestedMaterialId);
+        await loadMaterialPdf(requestedMaterialId);
+        await renderPdfPage();
+      }
+      const pendingInk = await pendingInkRows(state.boardId, requestedMaterialId);
       if (pendingInk.length) {
         const inkRows = new Map((Array.isArray(result.ink) ? result.ink : []).map(function (item) { return [String(item.id), item]; }));
         pendingInk.forEach(function (item) { inkRows.set(String(item.id), item); });
@@ -2191,50 +2557,253 @@
       }
       const pendingState = state.view === "student" ? null : await pendingClassroomState(state.boardId);
       if (pendingState) result.state = pendingState;
-      if (result.inkVersion !== undefined) state.teacherInkVersion = String(result.inkVersion || "");
+      if (result.submissionCounts) applySubmissionCounts(result.submissionCounts);
+      if (result.inkVersion !== undefined) state.teacherInkVersions.set(requestedMaterialId, String(result.inkVersion || ""));
       if (result.inkChanged !== false && Array.isArray(result.ink)) {
-        state.teacherInk.clear();
+        const prefix = requestedMaterialId + "|";
+        Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
         result.ink.forEach(function (item) {
-          state.teacherInk.set(Number(item.page) || 1, Array.isArray(item.strokes) ? item.strokes : []);
+          state.teacherInk.set(materialInkKey(item.materialId || requestedMaterialId, Number(item.page) || 1), Array.isArray(item.strokes) ? item.strokes : []);
+        });
+        localRevisions.forEach(function (revision, key) {
+          if (teacherInkRevision.get(key) === revision && localInk.has(key)) state.teacherInk.set(key, localInk.get(key));
         });
       }
-      if (state.view === "student") {
-        renderTeacherInk();
-        return;
-      }
       const shared = result.state || {};
+      const sharedMaterialId = String(shared.materialId || legacyMaterialId(state.boardId));
       const maxPage = state.pdf ? state.pdf.numPages : Math.max(1, Number(shared.page) || 1);
       const nextPage = clamp(Number(shared.page) || 1, 1, maxPage);
       const nextZoom = clamp(Number(shared.zoom) || 1, .6, 2.2);
-      const pageChanged = Number(state.currentPage) !== Number(nextPage);
-      const zoomChanged = Number(state.zoom) !== Number(nextZoom);
-      state.currentPage = nextPage;
-      state.zoom = nextZoom;
-      if (pageChanged || zoomChanged) await renderPdfPage();
-      else { renderTeacherInk(); updatePdfToolbar(); }
+      if (state.view === "student") {
+        if (activeMaterialMissing && state.materials.length) {
+          await selectMaterial(state.materials[0].id);
+          return;
+        }
+        if (sharedMaterialId !== String(state.activeMaterialId)) {
+          if (state.materials.some(function (item) { return String(item.id) === sharedMaterialId; })) {
+            await selectMaterial(sharedMaterialId, { remote: true, page: nextPage, zoom: nextZoom });
+          }
+          return;
+        }
+        const pageChanged = Number(state.currentPage) !== Number(nextPage);
+        const zoomChanged = Number(state.zoom) !== Number(nextZoom);
+        state.currentPage = nextPage;
+        state.zoom = nextZoom;
+        if (pageChanged || zoomChanged) await renderPdfPage();
+        renderMaterialControls();
+        renderStudentAreaList();
+        renderZones();
+        renderTeacherInk();
+        return;
+      }
+      if (sharedMaterialId !== String(state.activeMaterialId)) {
+        if (state.classroomStateRevision === 0 && state.materials.some(function (item) { return String(item.id) === sharedMaterialId; })) {
+          await selectMaterial(sharedMaterialId, { remote: true, page: nextPage, zoom: nextZoom });
+        }
+        return;
+      }
+      const stateChangedDuringSync = state.classroomStateRevision !== localStateRevision;
+      const remoteMatchesLocal = Number(localPage) === Number(nextPage) && Number(localZoom) === Number(nextZoom);
+      const preserveLocalState = state.classroomStateRevision > 0 && (stateChangedDuringSync || !remoteMatchesLocal);
+      if (!preserveLocalState) {
+        const pageChanged = Number(state.currentPage) !== Number(nextPage);
+        const zoomChanged = Number(state.zoom) !== Number(nextZoom);
+        state.currentPage = nextPage;
+        state.zoom = nextZoom;
+        if (state.classroomStateRevision > 0 && remoteMatchesLocal) state.classroomStateRevision = 0;
+        if (pageChanged || zoomChanged) await renderPdfPage();
+        else { renderTeacherInk(); updatePdfToolbar(); }
+      } else {
+        renderTeacherInk();
+        updatePdfToolbar();
+      }
+      renderMaterialControls();
+      renderReviewAreaList();
     }
 
     function scheduleClassroomStateSave() {
       if (state.view !== "review" || !state.board) return;
+      state.classroomStateRevision += 1;
+      const revision = state.classroomStateRevision;
       window.clearTimeout(state.classroomStateTimer);
-      state.classroomStateTimer = window.setTimeout(function () { persistClassroomState(); }, 300);
+      state.classroomStateTimer = window.setTimeout(function () { persistClassroomState(revision); }, 300);
     }
 
-    async function persistClassroomState() {
+    async function persistClassroomState(revision) {
       if (state.view !== "review" || !state.board) return;
-      const payload = { id: "STATE-" + state.board.id, boardId: state.board.id, page: state.currentPage, zoom: state.zoom };
+      const payload = { id: "STATE-" + state.board.id, boardId: state.board.id, materialId: state.activeMaterialId || legacyMaterialId(state.board.id), page: state.currentPage, zoom: state.zoom };
       try {
         await commitLocalMutation("saveClassroomState", payload);
+        if (revision !== undefined && state.classroomStateRevision !== revision) return;
       } catch (error) {
         await showModal("課堂狀態保存失敗", error.message || "請稍後再試。", "error");
       }
     }
 
+    let classroomPollBusy = false;
+    async function pollClassroomView() {
+      if (classroomPollBusy) return;
+      classroomPollBusy = true;
+      try {
+        if (state.view === "review") await Promise.all([loadClassroomSync(), loadReviewSubmissions()]);
+        else if (state.view === "student") await Promise.all([loadClassroomSync(), loadStudentSubmissions()]);
+      } finally {
+        classroomPollBusy = false;
+      }
+    }
+
+    function startClassroomPolling() {
+      if (state.pollTimer) window.clearInterval(state.pollTimer);
+      state.pollTimer = window.setInterval(function () { pollClassroomView(); }, CLASSROOM_POLL_INTERVAL);
+    }
+
+    function renderMaterialControls() {
+      document.querySelectorAll("[data-material-controls]").forEach(function (controls) {
+        const select = controls.querySelector("[data-material-select]");
+        const addButton = controls.querySelector("[data-material-add]");
+        const deleteButton = controls.querySelector("[data-material-delete]");
+        if (select) {
+          select.innerHTML = state.materials.length ? state.materials.map(function (material, index) {
+            return "<option value=\"" + escapeHtml(material.id) + "\">" + escapeHtml((index + 1) + "．" + material.name) + "</option>";
+          }).join("") : "<option value=\"\">尚未加入 PDF 教材</option>";
+          select.value = state.activeMaterialId || "";
+          select.disabled = !state.materials.length;
+        }
+        if (addButton) addButton.disabled = state.view !== "editor";
+        if (deleteButton) deleteButton.disabled = state.view !== "editor" || state.materials.length <= 1;
+      });
+    }
+
+    function ensureMaterialControls(view) {
+      const selector = view === "student" ? ".student-workspace .pdf-toolbar" : (view === "editor" ? ".workspace-shell .pdf-toolbar" : "#teacherPdfToolbar");
+      const toolbar = document.querySelector(selector);
+      if (!toolbar || toolbar.querySelector("[data-material-controls]")) {
+        renderMaterialControls();
+        return;
+      }
+      const controls = document.createElement("div");
+      controls.className = "toolbar-group material-control-group";
+      controls.dataset.materialControls = view;
+      const label = document.createElement("label");
+      label.className = "material-select-label";
+      label.textContent = "教材";
+      const select = document.createElement("select");
+      select.className = "toolbar-button material-select";
+      select.dataset.materialSelect = "1";
+      select.setAttribute("aria-label", "選擇 PDF 教材");
+      select.addEventListener("change", function () {
+        selectMaterial(select.value).catch(function (error) { showToast("切換教材失敗：" + (error.message || "請稍後再試。"), "error"); });
+      });
+      label.appendChild(select);
+      controls.appendChild(label);
+      if (view === "editor") {
+        const addButton = document.createElement("button");
+        addButton.className = "toolbar-button";
+        addButton.type = "button";
+        addButton.dataset.materialAdd = "1";
+        addButton.textContent = "＋新增 PDF";
+        addButton.addEventListener("click", openMaterialForm);
+        controls.appendChild(addButton);
+        const deleteButton = document.createElement("button");
+        deleteButton.className = "toolbar-button danger";
+        deleteButton.type = "button";
+        deleteButton.dataset.materialDelete = "1";
+        deleteButton.textContent = "刪除教材";
+        deleteButton.addEventListener("click", deleteActiveMaterial);
+        controls.appendChild(deleteButton);
+      }
+      toolbar.appendChild(controls);
+      renderMaterialControls();
+    }
+
+    async function selectMaterial(materialId, options) {
+      const settings = options || {};
+      const material = state.materials.find(function (item) { return String(item.id) === String(materialId); });
+      if (!material) return false;
+      const previousMaterialId = String(state.activeMaterialId || "");
+      if (state.view === "student" && previousMaterialId && previousMaterialId !== String(material.id)) saveStudentMaterialPosition();
+      if (state.view === "student" && previousMaterialId !== String(material.id)) state.studentSubmissions.clear();
+      state.activeMaterialId = String(material.id);
+      if (state.view === "student") {
+        try { localStorage.setItem(APP_KEY + "student_material_" + state.boardId, state.activeMaterialId); } catch (error) {}
+      }
+      if (settings.page !== undefined) state.currentPage = Number(settings.page) || 1;
+      else if (state.view === "student") {
+        const position = readStudentMaterialPosition(state.activeMaterialId);
+        state.currentPage = Number(position.page) || 1;
+        state.zoom = clamp(Number(position.zoom) || 1, .5, 3.0);
+      } else {
+        state.currentPage = 1;
+        state.zoom = 1;
+      }
+      await loadMaterialPdf(state.activeMaterialId);
+      if (state.pdf) state.currentPage = clamp(Number(state.currentPage) || 1, 1, state.pdf.numPages);
+      if (settings.zoom !== undefined) state.zoom = clamp(Number(settings.zoom) || 1, .5, 3.0);
+      state.selectedAreaId = "";
+      state.activeAreaId = "";
+      if (state.view === "editor" || state.view === "review") await loadTeacherInk(state.activeMaterialId);
+      renderMaterialControls();
+      renderEditorAreaList();
+      renderReviewAreaList();
+      renderStudentAreaList();
+      await renderPdfPage();
+      renderZones();
+      if (state.view === "review") {
+        if (!settings.remote) scheduleClassroomStateSave();
+        await loadReviewSubmissions();
+      } else if (state.view === "student") {
+        saveStudentMaterialPosition();
+        await loadStudentSubmissions();
+        await loadClassroomSync();
+      }
+      return true;
+    }
+
+    function openMaterialForm() {
+      openFormModal("新增 PDF 教材", "<form><div class=\"field\"><label for=\"materialNameField\">教材名稱</label><input id=\"materialNameField\" name=\"name\" maxlength=\"80\" required placeholder=\"例如：第一冊課文\"></div><div class=\"field\"><label for=\"materialPdfField\">PDF 教材</label><input id=\"materialPdfField\" name=\"pdf\" type=\"file\" accept=\"application/pdf,.pdf\" required><p class=\"helper\">PDF 會保存到 Google Drive，建議控制在 20 MB 以內。</p></div></form>", "新增教材", async function (formData) {
+        const name = String(formData.get("name") || "").trim();
+        const input = document.getElementById("materialPdfField");
+        if (!name || !input || !input.files || !input.files[0]) throw new Error("請填寫教材名稱並選擇 PDF。");
+        const file = input.files[0];
+        if (file.size > MAX_PDF_BYTES) throw new Error("PDF 超過 20 MB，請先壓縮檔案後再上傳。");
+        const pdf = { name: file.name, mime: "application/pdf", data: await fileToDataUrl(file) };
+        const result = await commitLocalMutation("createMaterial", { boardId: state.board.id, id: createId("M"), name: name, pdf: pdf });
+        if (result.board) state.board = result.board;
+        state.materials = normalizeMaterials(state.board, result.board && result.board.materials || state.materials.concat([result.material]));
+        state.areas = normalizeAreas(result.areas || state.areas, state.board.id);
+        await selectMaterial(result.material.id);
+        showToast(state.demo ? "PDF 教材已加入課堂。" : "教材已先儲存在本機，背景同步中。", state.demo ? "success" : "warning");
+        return true;
+      });
+    }
+
+    async function deleteActiveMaterial() {
+      const material = activeMaterial();
+      if (!material || state.materials.length <= 1) return;
+      const ok = await showModal("刪除課堂教材", "刪除「" + material.name + "」會一併刪除該教材的問答區、學生作答與教師筆跡，確定嗎？", "confirm");
+      if (!ok) return;
+      try {
+        const result = await commitLocalMutation("deleteMaterial", { boardId: state.board.id, materialId: material.id });
+        const prefix = String(material.id) + "|";
+        Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
+        state.teacherInkVersions.delete(String(material.id));
+        state.areas = state.areas.filter(function (area) { return String(area.materialId) !== String(material.id); });
+        state.materials = normalizeMaterials(state.board, result.materials || (state.materials.filter(function (item) { return String(item.id) !== String(material.id); })));
+        const next = state.materials[0];
+        if (next) await selectMaterial(next.id);
+        showToast(state.demo ? "課堂教材已刪除。" : "教材已先在本機刪除，背景同步中。", state.demo ? "success" : "warning");
+      } catch (error) {
+        await showModal("刪除教材失敗", error.message || "請稍後再試。", "error");
+      }
+    }
+
     async function undoTeacherInk() {
-      const strokes = teacherInkForPage(state.currentPage);
+      const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
+      const page = Number(state.currentPage) || 1;
+      const strokes = teacherInkForPage(page, materialId);
       if (!strokes.length) return;
       strokes.pop();
-      state.teacherInk.set(Number(state.currentPage), strokes);
+      state.teacherInk.set(materialInkKey(materialId, page), strokes);
       renderTeacherInk();
       scheduleTeacherInkSave();
     }
@@ -2243,21 +2812,24 @@
       const ok = await showModal("清除本頁手寫", "只會清除目前 PDF 頁面的教師手寫，確定嗎？", "confirm");
       if (!ok) return;
       const page = Number(state.currentPage) || 1;
-      state.teacherInk.set(page, []);
-      markTeacherInkChanged(page);
+      const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
+      state.teacherInk.set(materialInkKey(materialId, page), []);
+      markTeacherInkChanged(page, materialId);
       renderTeacherInk();
-      await persistTeacherInk(page, state.board && state.board.id);
+      await persistTeacherInk(page, state.board && state.board.id, materialId);
     }
 
     async function clearAllTeacherInk() {
       const ok = await showModal("全部清除教師手寫", "會清除這份教材所有頁面的教師手寫，確定嗎？", "confirm");
       if (!ok) return;
-      const pages = new Set(Array.from(state.teacherInk.keys()).concat([Number(state.currentPage) || 1]));
-      state.teacherInk.clear();
+      const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
+      const prefix = materialId + "|";
+      const pages = new Set(Array.from(state.teacherInk.keys()).filter(function (key) { return String(key).indexOf(prefix) === 0; }).map(function (key) { return Number(String(key).slice(prefix.length)) || 1; }).concat([Number(state.currentPage) || 1]));
+      Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
       renderTeacherInk();
       for (const page of pages) {
-        markTeacherInkChanged(page);
-        await persistTeacherInk(page, state.board && state.board.id);
+        markTeacherInkChanged(page, materialId);
+        await persistTeacherInk(page, state.board && state.board.id, materialId);
       }
     }
 
@@ -2587,9 +3159,11 @@
         return;
       }
       if (!teacherInkActiveStroke) return;
-      const strokes = teacherInkForPage(state.currentPage).slice();
-      strokes.push(teacherInkActiveStroke);
-      state.teacherInk.set(Number(state.currentPage), strokes);
+       const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
+       const page = Number(state.currentPage) || 1;
+       const strokes = teacherInkForPage(page, materialId).slice();
+       strokes.push(teacherInkActiveStroke);
+       state.teacherInk.set(materialInkKey(materialId, page), strokes);
       teacherInkActiveStroke = null;
       renderTeacherInk();
       scheduleTeacherInkSave();
@@ -2617,7 +3191,9 @@
     }
 
     function eraseTeacherInkAt(point) {
-      const strokes = teacherInkForPage(state.currentPage);
+      const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
+      const page = Number(state.currentPage) || 1;
+      const strokes = teacherInkForPage(page, materialId);
       const kept = strokes.filter(function (stroke) {
         const strokeW = Number(stroke.width || .005);
         const mult = stroke.tool === "highlighter" ? 6 : 1;
@@ -2629,7 +3205,7 @@
         return true;
       });
       if (kept.length !== strokes.length) {
-        state.teacherInk.set(Number(state.currentPage), kept);
+        state.teacherInk.set(materialInkKey(materialId, page), kept);
         teacherInkChanged = true;
         renderTeacherInk();
       }
@@ -2662,7 +3238,7 @@
         canvas.dataset.logicalHeight = height;
       }
       const teacherView = state.view === "editor" || state.view === "review" || state.view === "student";
-      const strokes = teacherInkForPage(state.currentPage).slice();
+       const strokes = teacherInkForPage(state.currentPage, state.activeMaterialId).slice();
       if (teacherInkActiveStroke) strokes.push(teacherInkActiveStroke);
       canvas.classList.toggle("visible", teacherView && (strokes.length > 0 || state.view === "review" || state.view === "editor"));
       drawTeacherInkStrokes(canvas, strokes);
@@ -2758,7 +3334,7 @@
       const list = document.getElementById("areaList");
       const count = document.getElementById("areaCount");
       if (!list) return;
-      const areas = syncAreaOrder();
+       const areas = currentMaterialAreas();
       if (count) count.textContent = areas.length;
       if (!areas.length) {
         list.innerHTML = "<div class=\"area-empty\">尚未設定問答區。</div>";
@@ -2770,17 +3346,21 @@
       }
     }
 
-    async function handlePdfReplace(event) {
-      const file = event.target.files && event.target.files[0];
+     async function handlePdfReplace(event) {
+       const file = event.target.files && event.target.files[0];
       if (!file) return;
       if (file.size > MAX_PDF_BYTES) { await showModal("PDF 太大", "請先壓縮 PDF 至 20 MB 以內，再重新上傳。", "error"); return; }
-      try {
-        state.pendingPdf = { name: file.name, mime: "application/pdf", data: await fileToDataUrl(file) };
-        state.pdfBytes = new Uint8Array(await file.arrayBuffer());
-        state.pdf = await window.pdfjsLib.getDocument({ data: state.pdfBytes }).promise;
-        state.currentPage = 1;
-        state.areas = [];
-        state.selectedAreaId = "";
+       try {
+         state.pendingPdf = { name: file.name, mime: "application/pdf", data: await fileToDataUrl(file) };
+         state.pdfBytes = new Uint8Array(await file.arrayBuffer());
+         state.pdf = await window.pdfjsLib.getDocument({ data: state.pdfBytes }).promise;
+          if (state.activeMaterialId) {
+            state.materialPdfCache.delete(String(state.activeMaterialId));
+            state.materialPdfBytesCache.delete(String(state.activeMaterialId));
+            state.areas = state.areas.filter(function (area) { return String(area.materialId || legacyMaterialId(state.boardId)) !== String(state.activeMaterialId); });
+          }
+         state.currentPage = 1;
+         state.selectedAreaId = "";
         renderEditorAreaList();
         await renderPdfPage();
         showToast("PDF 已載入，請重新設定問答區。", "success");
@@ -2789,15 +3369,21 @@
       }
     }
 
-    async function saveEditorBoard() {
-      const payload = { boardId: state.board.id, name: document.getElementById("editorNameField").value.trim(), description: document.getElementById("editorDescriptionField").value.trim(), areas: syncAreaOrder() };
+     async function saveEditorBoard() {
+       const payload = { boardId: state.board.id, name: document.getElementById("editorNameField").value.trim(), description: document.getElementById("editorDescriptionField").value.trim(), areas: syncAreaOrder() };
        if (!payload.name) { await showModal("資料未完整", "請填寫版面名稱。", "error"); return; }
-       if (state.pendingPdf) payload.pdf = state.pendingPdf;
+       if (state.pendingPdf) {
+         payload.pdf = state.pendingPdf;
+         payload.materialId = state.activeMaterialId || legacyMaterialId(state.board.id);
+       }
        try {
          const result = await commitLocalMutation("updateBoard", payload);
-         state.board = result.board;
-         state.areas = result.areas || state.areas;
+          state.board = result.board;
+          state.materials = normalizeMaterials(state.board, result.materials || state.board.materials || state.materials);
+          state.areas = normalizeAreas(result.areas || state.areas, state.board.id);
+          if (!state.materials.some(function (item) { return String(item.id) === String(state.activeMaterialId); })) state.activeMaterialId = state.materials[0] ? state.materials[0].id : "";
          state.pendingPdf = null;
+         if (state.activeMaterialId) await loadMaterialPdf(state.activeMaterialId);
          renderEditorAreaList();
          renderZones();
          showToast(state.demo ? "版面與問答區已儲存。" : "已先儲存在本機，背景同步中。", state.demo ? "success" : "warning");
@@ -2853,8 +3439,9 @@
        const layer = document.getElementById("zoneLayer");
        const rect = layer.getBoundingClientRect();
        if (!rect.width || !rect.height) return;
-       const defaultTitle = "問答區 " + (state.areas.length + 1);
-       const area = { id: createId("Q"), page: state.currentPage, x: clamp((event.clientX - rect.left) / rect.width, 0, 1), y: clamp((event.clientY - rect.top) / rect.height, 0, 1), width: 0.03, height: 0.03, title: defaultTitle, autoTitle: defaultTitle, prompt: "請輸入你的答案，或拍照上傳。", order: state.areas.length + 1 };
+        const currentAreas = currentMaterialAreas();
+        const defaultTitle = "問答區 " + (currentAreas.length + 1);
+        const area = { id: createId("Q"), materialId: state.activeMaterialId || legacyMaterialId(state.boardId), page: state.currentPage, x: clamp((event.clientX - rect.left) / rect.width, 0, 1), y: clamp((event.clientY - rect.top) / rect.height, 0, 1), width: 0.03, height: 0.03, title: defaultTitle, autoTitle: defaultTitle, prompt: "請輸入你的答案，或拍照上傳。", order: currentAreas.length + 1 };
        state.areas.push(area);
        state.selectedAreaId = area.id;
        state.drawingZone = false;
@@ -3023,14 +3610,20 @@
     }
 
     function submissionCountForArea(areaId) {
+      if (state.submissionCounts.has(String(areaId))) return state.submissionCounts.get(String(areaId));
       return state.submissions.filter(function (item) { return String(item.areaId) === String(areaId); }).length;
+    }
+
+    function currentMaterialAreas() {
+      const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
+      return state.areas.filter(function (area) { return String(area.materialId || legacyMaterialId(state.boardId)) === materialId; });
     }
 
     function renderZones() {
       const layer = document.getElementById("zoneLayer");
       if (!layer) return;
       layer.querySelectorAll(".zone").forEach(function (element) { element.remove(); });
-      const currentAreas = syncAreaOrder().filter(function (area) { return Number(area.page) === Number(state.currentPage); });
+       const currentAreas = currentMaterialAreas().filter(function (area) { return Number(area.page) === Number(state.currentPage); });
       currentAreas.forEach(function (area, index) {
         const zone = document.createElement("button");
         zone.type = "button";
@@ -3133,37 +3726,41 @@
       if (teacherInkActiveStroke || teacherInkErasing) finishTeacherInk(null, true);
       state.currentPage = clamp(state.currentPage + delta, 1, state.pdf.numPages);
       renderPdfPage();
-      scheduleClassroomStateSave();
+      if (state.view === "student") saveStudentMaterialPosition();
+      else scheduleClassroomStateSave();
     }
 
     function setZoom(value) {
       state.zoom = clamp(Math.round(value * 100) / 100, .5, 3.0);
       renderPdfPage();
-      scheduleClassroomStateSave();
+      if (state.view === "student") saveStudentMaterialPosition();
+      else scheduleClassroomStateSave();
     }
 
     function fitPdfToScroll() {
       state.zoom = 1;
       renderPdfPage();
-      scheduleClassroomStateSave();
+      if (state.view === "student") saveStudentMaterialPosition();
+      else scheduleClassroomStateSave();
     }
 
     async function renderStudentView(boardId) {
       const main = document.getElementById("appMain");
       main.innerHTML = "<div class=\"loading-wrap loading\">正在開啟學生作答頁</div>";
        await loadBoardContext(boardId);
-       main.innerHTML = "<section class=\"student-shell\"><div class=\"student-banner\"><div><p class=\"eyebrow\">STUDENT RESPONSE</p><h1>" + escapeHtml(state.board.name) + "</h1><p>點擊 PDF 上的問答區，拍照或輸入文字完成作答。</p></div><div class=\"student-identity\"><label for=\"studentNicknameField\">你的暱稱</label><input id=\"studentNicknameField\" maxlength=\"40\" placeholder=\"例如：小安\" value=\"" + escapeHtml(state.nickname) + "\"></div></div><div class=\"offline-note\">目前離線，送出的答案會先保留在這台裝置，網路恢復後自動補傳。</div><div class=\"workspace-shell student-workspace\"><div class=\"pdf-workspace\"><section class=\"pdf-main\"><div class=\"pdf-toolbar\"><div class=\"toolbar-group\"><button class=\"toolbar-button\" id=\"studentPrevPage\" type=\"button\">‹</button><span class=\"toolbar-label\" id=\"pageLabel\">第 1 頁</span><button class=\"toolbar-button\" id=\"studentNextPage\" type=\"button\">›</button></div><div class=\"toolbar-group\"><button class=\"toolbar-button\" id=\"studentZoomOut\" type=\"button\">−</button><span class=\"toolbar-label\" id=\"zoomLabel\">100％</span><button class=\"toolbar-button\" id=\"studentZoomIn\" type=\"button\">＋</button><button class=\"toolbar-button\" id=\"studentFit\" type=\"button\">適合</button></div></div><div class=\"pdf-scroll\"><div class=\"page-stage\" id=\"pageStage\"><canvas id=\"pdfCanvas\"></canvas><div class=\"zone-layer\" id=\"zoneLayer\"></div></div></div></section><aside class=\"workspace-sidebar\"><div class=\"sidebar-title\"><span>問答區</span><span class=\"meta-chip\" id=\"studentProgress\">尚未作答</span></div><div class=\"area-list\" id=\"studentAreaList\"></div><div class=\"answer-panel\" id=\"answerPanel\"><div class=\"answer-panel-empty\"><div><strong>從 PDF 選一個問答區</strong><span>你的答案會和這份教材版面分開保存。</span></div></div></div></aside></div></div></div></section>";
+       main.innerHTML = "<section class=\"student-shell\"><div class=\"student-banner\"><div><p class=\"eyebrow\">STUDENT RESPONSE</p><h1>" + escapeHtml(state.board.name) + "</h1><p>點擊 PDF 上的問答區，拍照或輸入文字完成作答。</p></div><div class=\"student-identity\"><label for=\"studentNicknameField\">你的暱稱</label><input id=\"studentNicknameField\" maxlength=\"40\" placeholder=\"例如：第一組\" value=\"" + escapeHtml(state.nickname) + "\"></div></div><div class=\"offline-note\">目前離線，送出的答案會先保留在這台裝置，網路恢復後自動補傳。</div><div class=\"workspace-shell student-workspace\"><div class=\"pdf-workspace\"><section class=\"pdf-main\"><div class=\"pdf-toolbar\"><div class=\"toolbar-group\"><button class=\"toolbar-button\" id=\"studentPrevPage\" type=\"button\">‹</button><span class=\"toolbar-label\" id=\"pageLabel\">第 1 頁</span><button class=\"toolbar-button\" id=\"studentNextPage\" type=\"button\">›</button></div><div class=\"toolbar-group\"><button class=\"toolbar-button\" id=\"studentZoomOut\" type=\"button\">−</button><span class=\"toolbar-label\" id=\"zoomLabel\">100％</span><button class=\"toolbar-button\" id=\"studentZoomIn\" type=\"button\">＋</button><button class=\"toolbar-button\" id=\"studentFit\" type=\"button\">適合</button></div></div><div class=\"pdf-scroll\"><div class=\"page-stage\" id=\"pageStage\"><canvas id=\"pdfCanvas\"></canvas><div class=\"zone-layer\" id=\"zoneLayer\"></div></div></div></section><aside class=\"workspace-sidebar\"><div class=\"sidebar-title\"><span>問答區</span><span class=\"meta-chip\" id=\"studentProgress\">尚未作答</span></div><div class=\"area-list\" id=\"studentAreaList\"></div><div class=\"answer-panel\" id=\"answerPanel\"><div class=\"answer-panel-empty\"><div><strong>從 PDF 選一個問答區</strong><span>你的答案會和這份教材版面分開保存。</span></div></div></div></aside></div></div></div></section>";
        const studentSidebar = main.querySelector(".student-workspace .workspace-sidebar");
        const studentAreaList = document.getElementById("studentAreaList");
        const studentAnswerPanel = document.getElementById("answerPanel");
        if (studentSidebar && studentAreaList && studentAnswerPanel) studentSidebar.insertBefore(studentAnswerPanel, studentAreaList);
        movePageNavigationToBottom(main.querySelector(".student-workspace .pdf-toolbar"), main.querySelector(".student-workspace .pdf-main"), "studentPageNav");
-      bindPdfSwipe(main.querySelector(".student-workspace .pdf-scroll"));
-      bindStudentEvents();
-      renderStudentAreaList();
-      await renderPdfPage();
-      Promise.all([loadClassroomSync(), loadStudentSubmissions()]).catch(function () {});
-      state.pollTimer = window.setInterval(function () { loadStudentSubmissions(); loadClassroomSync(); }, 5000);
+       bindPdfSwipe(main.querySelector(".student-workspace .pdf-scroll"));
+       ensureMaterialControls("student");
+       bindStudentEvents();
+       renderStudentAreaList();
+       await renderPdfPage();
+       Promise.all([loadClassroomSync(), loadStudentSubmissions()]).catch(function () {});
+       startClassroomPolling();
     }
 
     function bindStudentEvents() {
@@ -3183,28 +3780,30 @@
     function renderStudentAreaList() {
       const list = document.getElementById("studentAreaList");
       if (!list) return;
-      if (!state.areas.length) {
+       if (!currentMaterialAreas().length) {
         list.innerHTML = "<div class=\"area-empty\">教師尚未設定問答區。</div>";
         return;
       }
       let answered = 0;
-      list.innerHTML = syncAreaOrder().map(function (area, index) {
-        const submission = state.studentSubmissions.get(area.id);
-        if (submission) answered += 1;
-        return "<div class=\"area-item " + (state.activeAreaId === area.id ? "selected" : "") + "\" data-student-area=\"" + escapeHtml(area.id) + "\"><span class=\"area-number\">" + (index + 1) + "</span><span class=\"area-item-copy\"><strong>" + escapeHtml(area.title || "問答區 " + (index + 1)) + "</strong><small>" + (submission ? (submission.status === "已批改" ? "教師已批改" : (submission.status === "待同步" ? "等待補傳" : "已送出")) : "尚未作答") + "</small></span><span>›</span></div>";
+       const areas = currentMaterialAreas();
+       list.innerHTML = areas.map(function (area, index) {
+         const submission = state.studentSubmissions.get(area.id);
+         if (submission) answered += 1;
+         const classCount = state.submissionCounts.has(String(area.id)) ? "，" + state.submissionCounts.get(String(area.id)) + " 組已作答" : "";
+         return "<div class=\"area-item " + (state.activeAreaId === area.id ? "selected" : "") + "\" data-student-area=\"" + escapeHtml(area.id) + "\"><span class=\"area-number\">" + (index + 1) + "</span><span class=\"area-item-copy\"><strong>" + escapeHtml(area.title || "問答區 " + (index + 1)) + "</strong><small>" + (submission ? (submission.status === "已批改" ? "教師已批改" : (submission.status === "待同步" ? "等待補傳" : "已送出")) : "尚未作答") + escapeHtml(classCount) + "</small></span><span>›</span></div>";
       }).join("");
       list.querySelectorAll("[data-student-area]").forEach(function (item) { item.addEventListener("click", function () { openStudentAnswerPanel(item.dataset.studentArea); }); });
       const progress = document.getElementById("studentProgress");
-      if (progress) progress.textContent = answered + "／" + state.areas.length + " 已作答";
+       if (progress) progress.textContent = answered + "／" + areas.length + " 已作答";
     }
 
     async function loadStudentSubmissions() {
       const nickname = String(state.nickname || "").trim();
       if (!nickname || !state.boardId) return;
       try {
-        const result = await api("listSubmissions", { boardId: state.boardId, nickname: nickname, role: "student" });
+         const result = await api("listSubmissions", { boardId: state.boardId, materialId: state.activeMaterialId, nickname: nickname, role: "student" });
         Promise.all((result.data || []).map(function (item) { return localPut("submissions", item); })).catch(function () {});
-        const rows = await mergePendingSubmissions(result.data || [], state.boardId, nickname);
+         const rows = await mergePendingSubmissions(result.data || [], state.boardId, nickname, state.activeMaterialId);
         state.studentSubmissions = new Map(rows.map(function (item) { return [item.areaId, item]; }));
         renderStudentAreaList();
         renderZones();
@@ -3213,8 +3812,8 @@
         setOfflineNote(false);
       } catch (error) {
         if (error.network) {
-          const localResult = await localRequest("listSubmissions", { boardId: state.boardId, nickname: nickname, role: "student" });
-          const rows = await mergePendingSubmissions(localResult.data || [], state.boardId, nickname);
+          const localResult = await localRequest("listSubmissions", { boardId: state.boardId, materialId: state.activeMaterialId, nickname: nickname, role: "student" });
+           const rows = await mergePendingSubmissions(localResult.data || [], state.boardId, nickname, state.activeMaterialId);
           state.studentSubmissions = new Map(rows.map(function (item) { return [item.areaId, item]; }));
           renderStudentAreaList();
           renderZones();
@@ -3250,7 +3849,7 @@
       state.activeStudentImages = [];
       state.keepStudentImageIds = [];
       state.keepStudentImageNames = [];
-      state.activeDraftKey = "draft-" + state.boardId + "-" + areaId + "-" + hashString(state.nickname || "guest");
+       state.activeDraftKey = studentDraftKey(state.boardId, state.activeMaterialId, areaId, state.nickname);
       renderStudentAreaList();
       renderZones();
       focusAreaOnPdf(area);
@@ -3277,7 +3876,7 @@
       for (let i = 0; i < state.keepStudentImageIds.length; i++) {
         const fileId = state.keepStudentImageIds[i];
         try {
-          const url = await fetchFileData(fileId, state.boardId);
+          const url = await fetchFileData(fileId, state.boardId, state.activeMaterialId);
           if (url) state.activeStudentImages.push({ id: fileId, dataUrl: url, name: state.keepStudentImageNames[i] || "答案照片.jpg" });
         } catch (error) {}
       }
@@ -3311,7 +3910,7 @@
     async function saveStudentDraft() {
       const field = document.getElementById("studentTextAnswer");
       if (!field || !state.activeDraftKey) return;
-      await localPut("drafts", { id: state.activeDraftKey, boardId: state.boardId, areaId: state.activeAreaId, nickname: state.nickname, text: field.value, images: state.pendingStudentImages, updatedAt: new Date().toISOString() });
+      await localPut("drafts", { id: state.activeDraftKey, boardId: state.boardId, materialId: state.activeMaterialId, areaId: state.activeAreaId, nickname: state.nickname, text: field.value, images: state.pendingStudentImages, updatedAt: new Date().toISOString() });
     }
 
     async function handleStudentPhotos(event) {
@@ -3474,7 +4073,7 @@
         await showModal("答案還是空的", "請輸入文字或拍照上傳答案。", "warning");
         return;
       }
-      const payload = { id: submissionIdFor(state.boardId, state.activeAreaId, nickname), boardId: state.boardId, areaId: state.activeAreaId, nickname: nickname, text: textField.value.trim(), images: state.pendingStudentImages, keepImageFileIds: keepIds, keepImageFileNames: keepNames, clientId: state.clientId, draftKey: state.activeDraftKey };
+       const payload = { id: submissionIdFor(state.boardId, state.activeAreaId, nickname, state.activeMaterialId), boardId: state.boardId, materialId: state.activeMaterialId, areaId: state.activeAreaId, nickname: nickname, text: textField.value.trim(), images: state.pendingStudentImages, keepImageFileIds: keepIds, keepImageFileNames: keepNames, clientId: state.clientId, draftKey: state.activeDraftKey };
       try {
         const result = await commitLocalMutation("saveSubmission", payload);
         state.studentSubmissions.set(state.activeAreaId, result.submission);
@@ -3491,7 +4090,7 @@
 
     function outboxId(action, payload) {
       const data = payload || {};
-      const key = data.clientBoardId || data.id || data.submissionId || data.boardId || createId("job");
+      const key = data.clientBoardId || data.id || data.submissionId || data.materialId || data.boardId || createId("job");
       return action + "-" + key;
     }
 
@@ -3514,6 +4113,7 @@
       const localSubmission = await localGet("submissions", payload.id);
       if (!localSubmission) return payload;
       payload.boardId = localSubmission.boardId || payload.boardId;
+      payload.materialId = localSubmission.materialId || payload.materialId;
       payload.areaId = localSubmission.areaId || payload.areaId;
       payload.nickname = localSubmission.nickname || payload.nickname;
       payload.text = localSubmission.text || "";
@@ -3541,7 +4141,7 @@
       if (item.action === "saveInk") return localGet("ink", payload.id);
       if (item.action === "saveClassroomState") return localGet("classroomState", payload.id);
       if (item.action === "saveSubmission" || item.action === "saveFeedback") return localGet("submissions", payload.id || payload.submissionId);
-      if (item.action === "createBoard" || item.action === "updateBoard" || item.action === "archiveBoard") return localGet("boards", payload.clientBoardId || payload.boardId);
+      if (isBoardMutationAction(item.action)) return localGet("boards", payload.clientBoardId || payload.boardId);
       return null;
     }
 
@@ -3571,9 +4171,32 @@
           renderStudentAreaList();
           renderZones();
         }
-      } else if ((item.action === "createBoard" || item.action === "updateBoard") && result.board) {
+      } else if (isBoardMutationAction(item.action) && item.action !== "deleteBoard" && result.board) {
         const local = await localGet("boards", result.board.id || payload.boardId);
-        await localPut("boards", Object.assign({}, local || {}, result.board, { areas: local && local.areas ? local.areas : (result.areas || []) }));
+        const previousActiveMaterial = activeMaterial();
+        const updatedBoard = Object.assign({}, local || {}, result.board, {
+          materials: result.materials || result.board.materials || (local && local.materials) || [],
+          areas: result.areas || (local && local.areas) || []
+        });
+        await localPut("boards", updatedBoard);
+        if (state.board && String(state.board.id) === String(updatedBoard.id)) {
+          state.board = updatedBoard;
+          state.materials = normalizeMaterials(updatedBoard, updatedBoard.materials);
+          state.areas = normalizeAreas(updatedBoard.areas || [], updatedBoard.id);
+          const nextActiveMaterial = activeMaterial();
+          const activePdfChanged = previousActiveMaterial && nextActiveMaterial && String(previousActiveMaterial.pdfFileId || "") !== String(nextActiveMaterial.pdfFileId || "");
+          if (activePdfChanged) {
+            state.materialPdfCache.delete(String(nextActiveMaterial.id));
+            state.materialPdfBytesCache.delete(String(nextActiveMaterial.id));
+            await loadMaterialPdf(nextActiveMaterial.id);
+            await renderPdfPage();
+          }
+          renderMaterialControls();
+          renderEditorAreaList();
+          renderReviewAreaList();
+          renderStudentAreaList();
+          renderZones();
+        }
       }
     }
 
@@ -3748,9 +4371,10 @@
        });
      }
 
-    function bindClassroomPdfEvents() {
-      setupTeacherPdfWorkspace();
-      document.getElementById("prevPageButton").addEventListener("click", function () { changePage(-1); });
+     function bindClassroomPdfEvents() {
+       setupTeacherPdfWorkspace();
+       ensureMaterialControls("review");
+       document.getElementById("prevPageButton").addEventListener("click", function () { changePage(-1); });
       document.getElementById("nextPageButton").addEventListener("click", function () { changePage(1); });
       document.getElementById("zoomOutButton").addEventListener("click", function () { setZoom(state.zoom - .1); });
       document.getElementById("zoomInButton").addEventListener("click", function () { setZoom(state.zoom + .1); });
@@ -3762,15 +4386,15 @@
            if (state.board) openShareModal(state.board);
          });
        }
-        bindTeacherInkToolbarEvents();
-        bindTeacherInkCanvas();
+       bindTeacherInkToolbarEvents();
+       bindTeacherInkCanvas();
      }
 
     function renderReviewAreaList() {
       const list = document.getElementById("reviewAreaList");
       const count = document.getElementById("classroomAreaCount");
       if (!list) return;
-      const areas = syncAreaOrder();
+       const areas = currentMaterialAreas();
       if (count) count.textContent = areas.length;
       if (!areas.length) {
         list.innerHTML = "<div class=\"area-empty\">教師尚未放置問答圖釘。</div>";
@@ -3784,10 +4408,11 @@
         item.addEventListener("click", function () {
           const area = state.areas.find(function (candidate) { return String(candidate.id) === String(item.dataset.reviewArea); });
           if (!area) return;
-          if (Number(area.page) !== Number(state.currentPage)) {
-            state.currentPage = Number(area.page) || 1;
-            renderPdfPage();
-          }
+           if (Number(area.page) !== Number(state.currentPage)) {
+             state.currentPage = Number(area.page) || 1;
+             renderPdfPage();
+             scheduleClassroomStateSave();
+           }
           openClassroomAnswerModal(area);
         });
       });
@@ -3810,16 +4435,18 @@
       await loadTeacherInk();
       bindClassroomPdfEvents();
       renderReviewAreaList();
-      await loadClassroomSync();
-      await renderPdfPage();
+       await loadClassroomSync();
+       await renderPdfPage();
        document.getElementById("reviewBackButton").addEventListener("click", function () { goView("manager"); });
        ["exportJsonButton", "exportCsvButton"].forEach(function (id) { const button = document.getElementById(id); if (button) button.remove(); });
        await loadReviewSubmissions();
-       state.pollTimer = window.setInterval(function () { loadReviewSubmissions(); }, 5000);
+       startClassroomPolling();
      }
 
     async function loadLocalReviewSubmissions() {
-      const rows = (await localAll("submissions")).filter(function (item) { return String(item.boardId) === String(state.boardId); });
+       const rows = (await localAll("submissions")).filter(function (item) {
+         return String(item.boardId) === String(state.boardId) && (!state.activeMaterialId || String(item.materialId || legacyMaterialId(state.boardId)) === String(state.activeMaterialId));
+       });
       state.submissions = rows;
       renderReviewAreaList();
       renderSubmissionList();
@@ -3832,9 +4459,9 @@
       let localRows = state.submissions;
       if (!skipLocal) localRows = await loadLocalReviewSubmissions();
       try {
-        const result = await managerApi("listSubmissions", { boardId: state.boardId, role: "teacher" });
+         const result = await managerApi("listSubmissions", { boardId: state.boardId, materialId: state.activeMaterialId, role: "teacher" });
         const remoteRows = result.data || [];
-        state.submissions = await mergePendingSubmissions(remoteRows, state.boardId, "");
+         state.submissions = await mergePendingSubmissions(remoteRows, state.boardId, "", state.activeMaterialId);
         state.reviewLoading = false;
         renderReviewAreaList();
         renderSubmissionList();
@@ -3844,7 +4471,9 @@
         Promise.all(remoteRows.map(function (item) { return localPut("submissions", item); })).catch(function () {});
       } catch (error) {
         state.reviewLoading = false;
-        state.submissions = (localRows || []).filter(function (item) { return String(item.boardId) === String(state.boardId); });
+         state.submissions = (localRows || []).filter(function (item) {
+           return String(item.boardId) === String(state.boardId) && (!state.activeMaterialId || String(item.materialId || legacyMaterialId(state.boardId)) === String(state.activeMaterialId));
+         });
         renderReviewAreaList();
         renderSubmissionList();
         renderZones();
@@ -3916,7 +4545,7 @@
         if (idx >= 0 && idx < rows.length) {
           const neighbor = rows[idx];
           (neighbor.imageFileIds || []).forEach(function (fileId) {
-            fetchFileData(fileId, state.boardId).catch(function () {});
+            fetchFileData(fileId, state.boardId, state.activeMaterialId).catch(function () {});
           });
         }
       });
@@ -4021,7 +4650,7 @@
         return;
       }
       state.reviewImages = await Promise.all(ids.map(async function (id) {
-        try { return await fetchFileData(id, state.boardId); } catch (error) { return ""; }
+        try { return await fetchFileData(id, state.boardId, state.activeMaterialId); } catch (error) { return ""; }
       }));
       tabs.innerHTML = state.reviewImages.map(function (_, index) { return "<button class=\"photo-tab " + (index === state.reviewPhotoIndex ? "active" : "") + "\" data-photo-index=\"" + index + "\" type=\"button\">照片 " + (index + 1) + "</button>"; }).join("");
       tabs.querySelectorAll("[data-photo-index]").forEach(function (button) { button.addEventListener("click", function () { state.reviewPhotoIndex = Number(button.dataset.photoIndex); const feedback = normalizeFeedback(state.reviewSubmission.teacherStrokes); state.reviewStrokes = state.reviewPhotoIndex === feedback.photoIndex ? JSON.parse(JSON.stringify(feedback.strokes || [])) : []; state.reviewZoom = 1; loadReviewImages(); }); });

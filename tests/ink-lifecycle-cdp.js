@@ -64,7 +64,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
       teacherInkActiveStroke = null;
       teacherInkActivePointerId = null;
       teacherInkContactActive = false;
-      state.teacherInk.set(Number(state.currentPage), []);
+       state.teacherInk.set(materialInkKey(state.activeMaterialId, Number(state.currentPage)), []);
       state.inkTool = "pen";
       renderTeacherInk();
     };
@@ -81,13 +81,13 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     stroke(pdfCanvas, 1001, 250, 220);
     stroke(pdfCanvas, 1002, 255, 223);
     await wait(360);
-    const teacherSeparateStrokes = (state.teacherInk.get(state.currentPage) || []).length === 2;
+     const teacherSeparateStrokes = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 2;
 
     resetTeacher();
     pageStage.dispatchEvent(makePointer("pointerdown", 1003, 300, 260));
     pageStage.dispatchEvent(makePointer("pointercancel", 1003, 300, 260));
     await wait(360);
-    const teacherShortCancel = (state.teacherInk.get(state.currentPage) || []).length === 1 && (state.teacherInk.get(state.currentPage) || [])[0].points.length >= 1;
+     const teacherShortCancel = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 1 && teacherInkForPage(state.currentPage, state.activeMaterialId)[0].points.length >= 1;
 
     resetTeacher();
     pageStage.dispatchEvent(makePointer("pointerdown", 1004, 340, 300));
@@ -96,7 +96,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     pageStage.dispatchEvent(makePointer("pointermove", 1005, 450, 348));
     pageStage.dispatchEvent(makePointer("pointerup", 1005, 450, 348));
     await wait(360);
-    const teacherStaleRecovery = (state.teacherInk.get(state.currentPage) || []).length === 2 && teacherInkActivePointerId === null;
+     const teacherStaleRecovery = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 2 && teacherInkActivePointerId === null;
 
     resetTeacher();
     pageStage.dispatchEvent(makePointer("pointerdown", 1008, 470, 360));
@@ -106,7 +106,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     pageStage.dispatchEvent(makePointer("pointermove", 1009, 560, 398, "pen", .5, 1));
     pageStage.dispatchEvent(makePointer("pointerup", 1009, 560, 398, "pen", 0, 0));
     await wait(360);
-    const teacherRelandWithoutDown = (state.teacherInk.get(state.currentPage) || []).length === 2 && teacherInkActivePointerId === null;
+     const teacherRelandWithoutDown = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 2 && teacherInkActivePointerId === null;
 
     resetTeacher();
     pageStage.dispatchEvent(makePointer("pointerdown", 1009, 580, 410));
@@ -116,14 +116,14 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     pageStage.dispatchEvent(makePointer("pointermove", 1009, 660, 448, "pen", .5, 1));
     pageStage.dispatchEvent(makePointer("pointerup", 1009, 660, 448, "pen", 0, 0));
     await wait(360);
-    const teacherRelandSamePointer = (state.teacherInk.get(state.currentPage) || []).length === 2 && teacherInkActivePointerId === null;
+     const teacherRelandSamePointer = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 2 && teacherInkActivePointerId === null;
 
     resetTeacher();
     stroke(pageStage, 1006, 380, 380);
     pageStage.dispatchEvent(makePointer("pointerdown", 1007, 390, 390, "touch"));
     pageStage.dispatchEvent(makePointer("pointermove", 1007, 410, 398, "touch"));
     pageStage.dispatchEvent(makePointer("pointerup", 1007, 410, 398, "touch"));
-    const teacherFingerIgnored = (state.teacherInk.get(state.currentPage) || []).length === 1;
+     const teacherFingerIgnored = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 1;
 
     const area = state.areas[0];
     const svgBase64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAwIiBoZWlnaHQ9IjYwMCI+PHJlY3Qgd2lkdGg9IjEwMDAiIGhlaWdodD0iNjAwIiBmaWxsPSJ3aGl0ZSIvPjwvc3ZnPg==";
@@ -199,13 +199,14 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     };
     const oldStroke = { tool: "pen", shape: "freehand", color: "#315f59", width: .0025, points: [{ x: .2, y: .2, pressure: .5 }] };
     const newStroke = { tool: "pen", shape: "freehand", color: "#315f59", width: .0025, points: [{ x: .3, y: .3, pressure: .5 }] };
-    state.teacherInk.set(Number(state.currentPage), [oldStroke]);
-    markTeacherInkChanged(Number(state.currentPage));
-    const oldSave = persistTeacherInk(Number(state.currentPage), state.board.id);
+     const teacherMaterialId = state.activeMaterialId;
+     state.teacherInk.set(materialInkKey(teacherMaterialId, Number(state.currentPage)), [oldStroke]);
+     markTeacherInkChanged(Number(state.currentPage), teacherMaterialId);
+     const oldSave = persistTeacherInk(Number(state.currentPage), state.board.id, teacherMaterialId);
     await wait(0);
-    state.teacherInk.set(Number(state.currentPage), [oldStroke, newStroke]);
-    markTeacherInkChanged(Number(state.currentPage));
-    const newSave = persistTeacherInk(Number(state.currentPage), state.board.id);
+     state.teacherInk.set(materialInkKey(teacherMaterialId, Number(state.currentPage)), [oldStroke, newStroke]);
+     markTeacherInkChanged(Number(state.currentPage), teacherMaterialId);
+     const newSave = persistTeacherInk(Number(state.currentPage), state.board.id, teacherMaterialId);
     await wait(0);
     if (pendingSaves.length !== 1) throw new Error("保存競速測試未建立串行佇列。");
     pendingSaves[0].resolve({ ok: true, annotation: { strokes: [oldStroke] } });
@@ -213,7 +214,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     if (pendingSaves.length !== 2) throw new Error("保存競速測試未等待前一筆完成。");
     pendingSaves[1].resolve({ ok: true, annotation: { strokes: [oldStroke, newStroke] } });
     await Promise.all([oldSave, newSave]);
-    const saveRaceProtected = JSON.stringify(state.teacherInk.get(Number(state.currentPage)) || []) === JSON.stringify([oldStroke, newStroke]);
+     const saveRaceProtected = JSON.stringify(teacherInkForPage(Number(state.currentPage), teacherMaterialId) || []) === JSON.stringify([oldStroke, newStroke]);
     window.commitLocalMutation = originalCommitLocalMutation;
     return JSON.stringify({ teacherSeparateStrokes, teacherShortCancel, teacherStaleRecovery, teacherRelandWithoutDown, teacherRelandSamePointer, teacherFingerIgnored, reviewSeparateStrokes, reviewRelandWithoutDown, reviewRelandSamePointer, reviewStylusGestureSafe, saveRaceProtected, teacherActivePointer: teacherInkActivePointerId, reviewActivePointer: reviewActivePointerId });
   })()`);
