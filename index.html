@@ -215,6 +215,11 @@
     .toolbar-button { min-width: 40px; min-height: 40px; padding: 7px 11px; color: var(--teal-dark); background: rgba(255,255,255,.62); border: 1px solid #d5d5cb; border-radius: 10px; }
     .toolbar-button:hover { background: #fff; border-color: #aac6ba; }
     .toolbar-button.active { color: #fffaf4; background: var(--accent); border-color: var(--accent); }
+    .material-control-group { min-width: 0; }
+    .material-select-label { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 68px; height: 40px; padding: 7px 25px 7px 11px; color: var(--teal-dark); background: rgba(255,255,255,.62); border: 1px solid #d5d5cb; border-radius: 10px; font-size: 12px; font-weight: 800; line-height: 1; white-space: nowrap; }
+    .material-select-label::after { content: "⌄"; position: absolute; top: 50%; right: 8px; pointer-events: none; transform: translateY(-56%); }
+    .material-select-label:focus-within { border-color: #85aa9c; box-shadow: 0 0 0 3px rgba(133,170,156,.16); }
+    .material-select { position: absolute; inset: 0; width: 100%; min-width: 0; height: 100%; padding: 0; opacity: 0; cursor: pointer; }
     .pdf-scroll { min-height: 620px; overflow: auto; padding: 34px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-x pan-y pinch-zoom; }
     .page-stage { position: relative; width: max-content; min-width: 340px; min-height: 440px; margin: 0 auto; background: #fff; box-shadow: 0 18px 38px rgba(38, 45, 41, .18); }
     .page-stage canvas { display: block; }
@@ -2783,6 +2788,8 @@
       const material = state.materials.find(function (item) { return String(item.id) === String(materialId); });
       if (!material) return false;
       const previousMaterialId = String(state.activeMaterialId || "");
+      const localReviewSelection = state.view === "review" && !settings.remote && previousMaterialId !== String(material.id);
+      if (localReviewSelection) scheduleClassroomStateSave();
       if (state.view === "student" && previousMaterialId && previousMaterialId !== String(material.id)) saveStudentMaterialPosition();
       if (state.view === "student" && previousMaterialId !== String(material.id)) state.studentSubmissions.clear();
       state.activeMaterialId = String(material.id);
@@ -2811,7 +2818,6 @@
       await renderPdfPage();
       renderZones();
       if (state.view === "review") {
-        if (!settings.remote) scheduleClassroomStateSave();
         await loadReviewSubmissions();
       } else if (state.view === "student") {
         saveStudentMaterialPosition();
@@ -3042,22 +3048,20 @@
       const canvas = document.getElementById("inkCanvas");
       if (!canvas || canvas.dataset.bound === "1") return;
       canvas.dataset.bound = "1";
-      const target = canvas.parentElement || canvas;
       canvas.style.touchAction = "none";
       canvas.style.willChange = "transform";
-      target.style.touchAction = "none";
-      target.addEventListener("pointerdown", beginTeacherInk);
-      target.addEventListener("pointerover", moveTeacherInk);
-      target.addEventListener("pointerout", moveTeacherInk);
-      target.addEventListener("pointermove", moveTeacherInk);
-      target.addEventListener("pointerrawupdate", moveTeacherInk);
-      target.addEventListener("pointerup", finishTeacherInk);
-      target.addEventListener("pointercancel", cancelTeacherInk);
-      target.addEventListener("lostpointercapture", cancelTeacherInk);
-      target.addEventListener("touchstart", beginTeacherInkTouch, { passive: false });
-      target.addEventListener("touchmove", moveTeacherInkTouch, { passive: false });
-      target.addEventListener("touchend", finishTeacherInkTouch, { passive: false });
-      target.addEventListener("touchcancel", cancelTeacherInkTouch, { passive: false });
+      canvas.addEventListener("pointerdown", beginTeacherInk);
+      canvas.addEventListener("pointerover", moveTeacherInk);
+      canvas.addEventListener("pointerout", moveTeacherInk);
+      canvas.addEventListener("pointermove", moveTeacherInk);
+      canvas.addEventListener("pointerrawupdate", moveTeacherInk);
+      canvas.addEventListener("pointerup", finishTeacherInk);
+      canvas.addEventListener("pointercancel", cancelTeacherInk);
+      canvas.addEventListener("lostpointercapture", cancelTeacherInk);
+      canvas.addEventListener("touchstart", beginTeacherInkTouch, { passive: false });
+      canvas.addEventListener("touchmove", moveTeacherInkTouch, { passive: false });
+      canvas.addEventListener("touchend", finishTeacherInkTouch, { passive: false });
+      canvas.addEventListener("touchcancel", cancelTeacherInkTouch, { passive: false });
     }
 
     function beginTeacherInk(event) {
