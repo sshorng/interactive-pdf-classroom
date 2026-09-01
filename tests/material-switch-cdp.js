@@ -54,6 +54,8 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     };
     const ready = await waitFor(() => state.view === "student" && state.materials.length > 1 && document.querySelector("[data-material-select]"), 15000);
     if (!ready) return JSON.stringify({ ready: false, view: state.view, materialCount: state.materials.length });
+    const pdfOptions = typeof pdfDocumentOptions === "function" ? pdfDocumentOptions(new Uint8Array([1])) : {};
+    const pdfTextAssetsConfigured = String(pdfOptions.cMapUrl || "").endsWith("/cmaps/") && pdfOptions.cMapPacked === true && String(pdfOptions.standardFontDataUrl || "").endsWith("/standard_fonts/");
     const select = document.querySelector("[data-material-select]");
     const label = select.closest(".material-select-label");
     const originalSync = window.loadClassroomSync;
@@ -71,7 +73,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     if (!target) return JSON.stringify({ ready: true, compact, options, switched: false });
     select.value = target.value;
     select.dispatchEvent(new Event("change", { bubbles: true }));
-    const switched = await waitFor(() => state.activeMaterialId === target.value && select.value === target.value && state.pdf && state.pdf.numPages > 0, 15000);
+    const switched = await waitFor(() => state.activeMaterialId === target.value && select.value === target.value && state.pdf && state.pdf.numPages > 0 && state.materialPdfCache.has(target.value), 15000);
     const originalView = state.view;
     const originalRevision = state.classroomStateRevision;
     const originalActiveId = state.activeMaterialId;
@@ -102,7 +104,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     window.loadReviewSubmissions = originalLoadReviews;
     window.renderPdfPage = originalRenderPdf;
     window.persistClassroomState = originalPersistState;
-    const result = { ready: true, compact, options, target: target.value, active: state.activeMaterialId, selected: select.value, pages: state.pdf && state.pdf.numPages, switched, reviewSelectionGuarded };
+    const result = { ready: true, compact, options, target: target.value, active: state.activeMaterialId, selected: select.value, pages: state.pdf && state.pdf.numPages, switched, reviewSelectionGuarded, pdfTextAssetsConfigured };
     window.loadClassroomSync = originalSync;
     window.loadStudentSubmissions = originalSubmissions;
     return JSON.stringify(result);
@@ -114,6 +116,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
   assert(checks.options.length > 1, "教材下拉選單缺少教材選項");
   assert(checks.switched === true, "選擇其他教材後 PDF 未切換");
   assert(checks.reviewSelectionGuarded === true, "教師切換教材未在載入前鎖住本地選擇");
+  assert(checks.pdfTextAssetsConfigured === true, "PDF 直式文字所需字型資源未設定");
   console.log("material-switch-cdp=" + JSON.stringify(checks));
   socket.close();
 })().catch((error) => {

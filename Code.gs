@@ -77,6 +77,8 @@ const JSON_REFERENCE_CACHE_PREFIX = "pdfw_json_v1_";
 const JSON_REFERENCE_CACHE_SECONDS = 300;
 const INK_DELTA_CACHE_PREFIX = "pdfw_ink_delta_v1_";
 const INK_DELTA_CACHE_SECONDS = 300;
+const CLASSROOM_PULSE_PREFIX = "pdfw_classroom_pulse_v1_";
+const CLASSROOM_PULSE_SECONDS = 30;
 
 function getSpreadsheet_() {
   const id = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
@@ -277,6 +279,43 @@ function getSetting_(key) {
 
 function now_() {
   return new Date().toISOString();
+}
+
+function classroomPulseKey_(boardId, suffix) {
+  return CLASSROOM_PULSE_PREFIX + String(boardId || "") + "_" + String(suffix || "");
+}
+
+function classroomPulseInkKey_(boardId, materialId, page) {
+  const safeMaterialId = String(materialId || "").replace(/[^A-Za-z0-9_.-]/g, "_");
+  return classroomPulseKey_(boardId, "ink_" + safeMaterialId + "_" + (Number(page) || 1));
+}
+
+function readClassroomPulseCache_(key) {
+  try {
+    const value = CacheService.getScriptCache().get(key);
+    return value === null ? null : String(value);
+  } catch (error) {
+    return null;
+  }
+}
+
+function writeClassroomPulseCache_(key, value) {
+  if (!key || value === undefined || value === null) return;
+  try {
+    CacheService.getScriptCache().put(key, String(value), CLASSROOM_PULSE_SECONDS);
+  } catch (error) {
+    // 脈衝快取失敗時，下一次請求會回到資料表查詢，不影響同步正確性。
+  }
+}
+
+function classroomPulseToken_() {
+  return now_() + "|" + Utilities.getUuid().replace(/-/g, "").slice(0, 12);
+}
+
+function touchClassroomPulse_(boardId) {
+  const token = classroomPulseToken_();
+  writeClassroomPulseCache_(classroomPulseKey_(boardId, "token"), token);
+  return token;
 }
 
 function makeId_(prefix) {
@@ -654,6 +693,45 @@ function inkVersion_(rows) {
   return rows.map(function (item) { return String(item.id || "") + ":" + String(item.updatedAt || ""); }).sort().join("|");
 }
 
+function classroomCatalogVersion_(board, materials, areas) {
+  const targetMaterials = materials || materialsForBoard_(board.id, board);
+  const targetAreas = areas || areasForBoard_(board.id, board);
+  const materialVersion = targetMaterials.map(function (item) {
+    return String(item.id || "") + ":" + String(item.updatedAt || "") + ":" + String(item.pdfFileId || "");
+  }).join(",");
+  const areaVersion = targetAreas.map(function (item) {
+    return String(item.id || "") + ":" + String(item.updatedAt || "");
+  }).join(",");
+  const raw = [String(board.updatedAt || ""), materialVersion, areaVersion].join("|");
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw));
+}
+
+function cacheClassroomPulseState_(state) {
+  if (!state || !state.boardId) return;
+  writeClassroomPulseCache_(classroomPulseKey_(state.boardId, "state"), JSON.stringify(state));
+}
+
+function cacheClassroomPulseCatalog_(boardId, version) {
+  writeClassroomPulseCache_(classroomPulseKey_(boardId, "catalog"), version);
+}
+
+function touchClassroomPulseCatalog_(board, materials, areas) {
+  if (!board || !board.id) return;
+  cacheClassroomPulseCatalog_(board.id, classroomCatalogVersion_(board, materials, areas));
+  touchClassroomPulse_(board.id);
+}
+
+function cacheClassroomPulseInk_(boardId, materialId, page, rows) {
+  writeClassroomPulseCache_(classroomPulseInkKey_(boardId, materialId, page), inkVersion_(rows || []));
+}
+
+function touchClassroomPulseInk_(item) {
+  const materialId = item.materialId || legacyMaterialId_(item.boardId);
+  const page = Number(item.page) || 1;
+  cacheClassroomPulseInk_(item.boardId, materialId, page, [item]);
+  touchClassroomPulse_(item.boardId);
+}
+
 function inkVersionMap_(value) {
   const output = {};
   String(value || "").split("|").forEach(function (entry) {
@@ -819,6 +897,7 @@ function saveInk_(payload) {
   else appendRow_("ink", item);
   if (appendOnly) writeInkDeltaRecord_(id, previousVersion, updatedAt, strokes.slice(previousStrokes.length));
   else clearInkDeltaRecords_(id);
+  touchClassroomPulseInk_(item);
   return { ok: true, annotation: payload.compact ? compactPublicInk_(item) : publicInk_(item) };
 }
 
@@ -831,6 +910,12 @@ function publicClassroomState_(item, boardId) {
     zoom: Math.max(0.6, Math.min(2.2, Number(item && item.zoom) || 1)),
     updatedAt: item ? item.updatedAt : ""
   };
+}
+
+function touchClassroomPulseState_(item, boardId) {
+  const state = publicClassroomState_(item, boardId);
+  cacheClassroomPulseState_(state);
+  touchClassroomPulse_(boardId);
 }
 
 function submissionCountsForBoard_(boardId, materialId, board, areas) {
@@ -877,9 +962,22 @@ function classroomSync_(payload) {
   const includeSubmissionCounts = String(payload.includeSubmissionCounts || "1") !== "0";
   const sharedState = publicClassroomState_(state, board.id);
   if (materials.length && !materials.some(function (item) { return String(item.id) === String(sharedState.materialId); })) sharedState.materialId = materials[0].id;
+  const stateVersion = String(sharedState.updatedAt || "");
+  const catalogVersion = classroomCatalogVersion_(board, materials, areas);
+  let pulseVersion = readClassroomPulseCache_(classroomPulseKey_(board.id, "token"));
+  if (pulseVersion === null) {
+    pulseVersion = [stateVersion, catalogVersion, inkVersion].join("¦");
+    writeClassroomPulseCache_(classroomPulseKey_(board.id, "token"), pulseVersion);
+  }
+  if (readClassroomPulseCache_(classroomPulseKey_(board.id, "state")) === null) cacheClassroomPulseState_(sharedState);
+  if (readClassroomPulseCache_(classroomPulseKey_(board.id, "catalog")) === null) cacheClassroomPulseCatalog_(board.id, catalogVersion);
+  if (inkPage > 0 && readClassroomPulseCache_(classroomPulseInkKey_(board.id, requestedMaterialId, inkPage)) === null) cacheClassroomPulseInk_(board.id, requestedMaterialId, inkPage, inkRows);
   return {
     ok: true,
     state: sharedState,
+    stateVersion: stateVersion,
+    catalogVersion: catalogVersion,
+    pulseVersion: pulseVersion,
     inkVersion: inkVersion,
     inkChanged: inkChanged,
     ink: inkChanged ? (useInkDelta && !pageReset ? changedInkRows.map(function (item) { return publicInkDelta_(item, clientInkVersions) || publicInk_(item); }) : inkRows.map(function (item) { return publicInk_(item); })) : null,
@@ -889,6 +987,78 @@ function classroomSync_(payload) {
     materialId: requestedMaterialId,
     materials: materials,
     areas: areas,
+    submissionCounts: includeSubmissionCounts ? submissionCountsForBoard_(board.id, requestedMaterialId, board, areas) : null,
+    serverTime: now_()
+  };
+}
+
+function classroomPulse_(payload) {
+  const board = getBoard_(payload.boardId, false);
+  const stateKey = classroomPulseKey_(board.id, "state");
+  let stateValue = readClassroomPulseCache_(stateKey);
+  let sharedState = stateValue ? parseObject_(stateValue, null) : null;
+  if (!sharedState || !sharedState.boardId) {
+    const stateRow = readTable_("classroomState").find(function (item) { return String(item.boardId) === String(board.id); });
+    sharedState = publicClassroomState_(stateRow, board.id);
+    cacheClassroomPulseState_(sharedState);
+  }
+
+  let catalogVersion = readClassroomPulseCache_(classroomPulseKey_(board.id, "catalog"));
+  let materials = null;
+  let areas = null;
+  if (catalogVersion === null) {
+    materials = materialsForBoard_(board.id, board);
+    areas = areasForBoard_(board.id, board);
+    catalogVersion = classroomCatalogVersion_(board, materials, areas);
+    cacheClassroomPulseCatalog_(board.id, catalogVersion);
+  }
+
+  let requestedMaterialId = String(payload.materialId || sharedState.materialId || legacyMaterialId_(board.id));
+  if (materials) {
+    const requestedMaterial = materials.find(function (item) { return String(item.id) === requestedMaterialId; });
+    if (!requestedMaterial) requestedMaterialId = String((materials.find(function (item) { return String(item.id) === String(sharedState.materialId); }) || materials[0] || { id: legacyMaterialId_(board.id) }).id);
+  }
+  const rawInkPage = Number(payload.inkPage);
+  const inkPage = Number.isFinite(rawInkPage) && rawInkPage > 0 ? Math.max(1, Math.floor(rawInkPage)) : 0;
+  const inkKey = classroomPulseInkKey_(board.id, requestedMaterialId, inkPage || 1);
+  let inkVersion = inkPage > 0 ? readClassroomPulseCache_(inkKey) : null;
+  if (inkPage > 0 && inkVersion === null) {
+    const inkRows = readTable_("ink").filter(function (item) {
+      return String(item.boardId) === String(board.id) && String(item.materialId || legacyMaterialId_(board.id)) === requestedMaterialId && (Number(item.page) || 1) === inkPage;
+    });
+    inkVersion = inkVersion_(inkRows);
+    cacheClassroomPulseInk_(board.id, requestedMaterialId, inkPage, inkRows);
+  }
+  if (inkPage === 0) inkVersion = "";
+
+  let pulseVersion = readClassroomPulseCache_(classroomPulseKey_(board.id, "token"));
+  if (pulseVersion === null) {
+    pulseVersion = [String(sharedState.updatedAt || ""), catalogVersion, inkVersion].join("¦");
+    writeClassroomPulseCache_(classroomPulseKey_(board.id, "token"), pulseVersion);
+  }
+  const stateVersion = String(sharedState.updatedAt || "");
+  const clientStateVersion = String(payload.stateVersion || "");
+  const clientCatalogVersion = String(payload.catalogVersion || "");
+  const clientInkVersion = String(payload.inkVersion || "");
+  const includeSubmissionCounts = String(payload.includeSubmissionCounts || "0") !== "0";
+  if (includeSubmissionCounts && !areas) areas = areasForBoard_(board.id, board);
+  return {
+    ok: true,
+    state: sharedState,
+    stateVersion: stateVersion,
+    catalogVersion: catalogVersion,
+    pulseVersion: pulseVersion,
+    stateChanged: clientStateVersion !== stateVersion,
+    catalogChanged: clientCatalogVersion !== catalogVersion,
+    inkVersion: inkVersion,
+    inkChanged: clientInkVersion !== inkVersion,
+    ink: null,
+    inkDelta: true,
+    inkReset: false,
+    inkPage: inkPage,
+    materialId: requestedMaterialId,
+    materials: null,
+    areas: null,
     submissionCounts: includeSubmissionCounts ? submissionCountsForBoard_(board.id, requestedMaterialId, board, areas) : null,
     serverTime: now_()
   };
@@ -909,6 +1079,7 @@ function saveClassroomState_(payload) {
   const existing = readTable_("classroomState").find(function (row) { return String(row.id) === item.id; });
   if (existing) updateRow_("classroomState", item.id, item);
   else appendRow_("classroomState", item);
+  touchClassroomPulseState_(item, board.id);
   return { ok: true, state: publicClassroomState_(item, board.id) };
 }
 
@@ -1020,6 +1191,7 @@ function saveAreas_(boardId, areas) {
       updatedAt: now
     });
   });
+  touchClassroomPulseCatalog_(board);
 }
 
 function updateBoard_(payload) {
@@ -1056,7 +1228,10 @@ function updateBoard_(payload) {
   updateRow_("boards", board.id, fields);
   if (payload.areas !== undefined) saveAreas_(board.id, payload.areas);
   const updatedBoard = Object.assign({}, board, fields);
-  return { ok: true, board: publicBoard_(updatedBoard), materials: materialsForBoard_(board.id, updatedBoard), areas: areasForBoard_(board.id, updatedBoard) };
+  const updatedMaterials = materialsForBoard_(board.id, updatedBoard);
+  const updatedAreas = areasForBoard_(board.id, updatedBoard);
+  touchClassroomPulseCatalog_(updatedBoard, updatedMaterials, updatedAreas);
+  return { ok: true, board: publicBoard_(updatedBoard), materials: updatedMaterials, areas: updatedAreas };
 }
 
 function createMaterial_(payload) {
@@ -1076,7 +1251,10 @@ function createMaterial_(payload) {
   appendRow_("materials", material);
   updateRow_("boards", board.id, { updatedAt: now });
   const updatedBoard = Object.assign({}, board, { updatedAt: now });
-  return { ok: true, material: publicMaterial_(material), board: publicBoard_(updatedBoard), materials: materialsForBoard_(board.id, updatedBoard), areas: areasForBoard_(board.id, updatedBoard) };
+  const updatedMaterials = materialsForBoard_(board.id, updatedBoard);
+  const updatedAreas = areasForBoard_(board.id, updatedBoard);
+  touchClassroomPulseCatalog_(updatedBoard, updatedMaterials, updatedAreas);
+  return { ok: true, material: publicMaterial_(material), board: publicBoard_(updatedBoard), materials: updatedMaterials, areas: updatedAreas };
 }
 
 function updateMaterial_(payload) {
@@ -1120,7 +1298,10 @@ function updateMaterial_(payload) {
   }
   updateRow_("boards", board.id, boardFields);
   const updatedBoard = Object.assign({}, board, boardFields);
-  return { ok: true, material: publicMaterial_(Object.assign({}, material, fields)), board: publicBoard_(updatedBoard), materials: materialsForBoard_(board.id, updatedBoard), areas: areasForBoard_(board.id, updatedBoard) };
+  const updatedMaterials = materialsForBoard_(board.id, updatedBoard);
+  const updatedAreas = areasForBoard_(board.id, updatedBoard);
+  touchClassroomPulseCatalog_(updatedBoard, updatedMaterials, updatedAreas);
+  return { ok: true, material: publicMaterial_(Object.assign({}, material, fields)), board: publicBoard_(updatedBoard), materials: updatedMaterials, areas: updatedAreas };
 }
 
 function deleteMaterial_(payload) {
@@ -1151,7 +1332,11 @@ function deleteMaterial_(payload) {
   const replacement = remainingMaterials[0];
   const stateRow = readTable_("classroomState").find(function (item) { return String(item.boardId) === String(board.id); });
   if (stateRow && String(stateRow.materialId || legacyMaterialId_(board.id)) === materialId) {
-    if (replacement) updateRow_("classroomState", stateRow.id, { materialId: replacement.id, page: 1, zoom: 1, updatedAt: now_() });
+    if (replacement) {
+      const stateUpdatedAt = now_();
+      updateRow_("classroomState", stateRow.id, { materialId: replacement.id, page: 1, zoom: 1, updatedAt: stateUpdatedAt });
+      touchClassroomPulseState_(Object.assign({}, stateRow, { materialId: replacement.id, page: 1, zoom: 1, updatedAt: stateUpdatedAt }), board.id);
+    }
   }
   const boardFields = { updatedAt: now_() };
   if (isLegacyMaterialId_(board, materialId) && replacement) {
@@ -1161,7 +1346,9 @@ function deleteMaterial_(payload) {
   }
   updateRow_("boards", board.id, boardFields);
   const updatedBoard = Object.assign({}, board, boardFields);
-  return { ok: true, materialId: materialId, materials: remainingMaterials, areas: areasForBoard_(board.id, updatedBoard), board: publicBoard_(updatedBoard) };
+  const updatedAreas = areasForBoard_(board.id, updatedBoard);
+  touchClassroomPulseCatalog_(updatedBoard, remainingMaterials, updatedAreas);
+  return { ok: true, materialId: materialId, materials: remainingMaterials, areas: updatedAreas, board: publicBoard_(updatedBoard) };
 }
 
 function archiveBoard_(payload) {
@@ -1352,13 +1539,14 @@ function getFile_(payload) {
   if (payload.materialId && String(index.materialId || legacyMaterialId_(index.boardId)) !== String(payload.materialId)) throw new Error("檔案與教材不一致。");
   const file = DriveApp.getFileById(fileId);
   const blob = file.getBlob();
+  const bytes = blob.getBytes();
   return {
     ok: true,
     fileId: fileId,
     name: file.getName(),
     mime: blob.getContentType(),
-    size: blob.getBytes().length,
-    base64: Utilities.base64Encode(blob.getBytes())
+    size: bytes.length,
+    base64: Utilities.base64Encode(bytes)
   };
 }
 
@@ -1390,10 +1578,12 @@ function doGet(e) {
     if (action === "settings") return jsonOut_({ ok: true, settings: settingsInfo_() });
     if (action === "listBoards") return jsonOut_(listBoards_(parameter));
     if (action === "getBoard") return jsonOut_(getBoardData_(parameter));
+    if (action === "classroomPulse") return jsonOut_(classroomPulse_(parameter));
     if (action === "classroomSync") return jsonOut_(classroomSync_(parameter));
     if (action === "getFile") return jsonOut_(getFile_(parameter));
     if (action === "sheetUrl") return jsonOut_({ ok: true, url: getSpreadsheet_().getUrl() });
-    return jsonOut_({ ok: true, message: "PDF 互動講義 API 已啟動。", serverTime: now_() });
+    if (action === "ping") return jsonOut_({ ok: true, message: "PDF 互動講義 API 已啟動。", serverTime: now_() });
+    throw new Error("未知的 API 動作：「" + action + "」。");
   } catch (error) {
     return jsonOut_({ ok: false, error: String(error.message || error) });
   }
@@ -1417,6 +1607,7 @@ function doPost(e) {
     else if (action === "deleteMaterial") result = withLock_(function () { return deleteMaterial_(payload); });
     else if (action === "listInk") result = listInk_(payload);
     else if (action === "saveInk") result = withLock_(function () { return saveInk_(payload); });
+    else if (action === "classroomPulse") result = classroomPulse_(payload);
     else if (action === "classroomSync") result = classroomSync_(payload);
     else if (action === "saveClassroomState") result = withLock_(function () { return saveClassroomState_(payload); });
     else if (action === "saveSubmission") result = withLock_(function () { return saveSubmission_(payload); });

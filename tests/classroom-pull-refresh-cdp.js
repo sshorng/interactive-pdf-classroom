@@ -64,12 +64,14 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     }
     let syncCalls = 0;
     let submissionCalls = 0;
+    const syncOptions = [];
     let failSync = false;
     const originalSync = window.loadClassroomSync;
     const originalReviewSubmissions = window.loadReviewSubmissions;
     const originalClassroomSubmissions = window.loadClassroomSubmissions;
-    window.loadClassroomSync = async function () {
+    window.loadClassroomSync = async function (options) {
       syncCalls += 1;
+      syncOptions.push(options || {});
       if (failSync) throw new Error("測試同步失敗");
     };
     window.loadReviewSubmissions = async function () {
@@ -183,6 +185,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     if (hasClassroomPolling) await window.pollClassroomView();
     const teacherPollingSync = syncCalls - pollingBefore.sync === 1;
     const teacherPollingSubmissions = submissionCalls - pollingBefore.submissions === 1;
+    const teacherPollingUsesPulse = syncOptions.some((options) => options.pulse === true);
 
     const pendingSyncResolvers = [];
     window.loadClassroomSync = function () {
@@ -192,7 +195,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     const firstSlowPoll = window.pollClassroomView();
     const secondSlowPoll = window.pollClassroomView();
     await wait(40);
-    const overlappingSync = pendingSyncResolvers.length === 2;
+    const singleSyncFlight = pendingSyncResolvers.length === 1;
     pendingSyncResolvers.forEach((resolve) => resolve());
     await Promise.all([firstSlowPoll, secondSlowPoll]);
 
@@ -200,7 +203,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     window.loadReviewSubmissions = originalReviewSubmissions;
     if (originalClassroomSubmissions) window.loadClassroomSubmissions = originalClassroomSubmissions;
     else delete window.loadClassroomSubmissions;
-    return JSON.stringify({ hasBinding, hasRefresh, hasClassroomPolling, topPullTriggeredOnce, nonTopPullIgnored, stylusPullIgnored, activeStylusPullIgnored, localInkPreserved, successIndicatorReset, failureIndicatorReset, teacherPollingSync, teacherPollingSubmissions, overlappingSync });
+    return JSON.stringify({ hasBinding, hasRefresh, hasClassroomPolling, topPullTriggeredOnce, nonTopPullIgnored, stylusPullIgnored, activeStylusPullIgnored, localInkPreserved, successIndicatorReset, failureIndicatorReset, teacherPollingSync, teacherPollingSubmissions, teacherPollingUsesPulse, singleSyncFlight });
   })()`);
 
   const checks = JSON.parse(result);
