@@ -586,8 +586,9 @@
     const MAX_IMAGE_COUNT = 2;
     const MAX_PDF_BYTES = 20 * 1024 * 1024;
     const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
-    const CLASSROOM_POLL_INTERVAL = 1500;
+    const CLASSROOM_POLL_INTERVAL = 1000;
     const CLASSROOM_SUBMISSIONS_POLL_INTERVAL = 6000;
+    const INK_SAVE_DELAY = 180;
     const INK_WIDTH_STEPS = [2, 4, 6, 8];
     const GAS_URL = resolveGasUrl();
 
@@ -649,6 +650,7 @@
       adminToken: localStorage.getItem(APP_KEY + "admin_token") || "",
       pollTimer: null,
       lastStudentSubmissionPollAt: 0,
+      lastClassroomCountsPollAt: 0,
       outboxRetryTimer: null,
       flushBusy: false,
       imageCache: new Map(),
@@ -2042,6 +2044,8 @@
       state.teacherInkVersions.clear();
       state.submissionCounts.clear();
       state.classroomStateRevision = 0;
+      state.lastStudentSubmissionPollAt = 0;
+      state.lastClassroomCountsPollAt = 0;
       state.currentPage = 1;
       state.zoom = 1;
       if (state.activeMaterialId) {
@@ -2056,8 +2060,11 @@
     }
 
     function goView(view, boardId) {
+      const targetBoardId = String(boardId || "");
+      const currentRoute = readRoute();
+      if (currentRoute.view === view && String(currentRoute.boardId || "") === targetBoardId) return;
       state.view = view;
-      state.boardId = boardId || "";
+      state.boardId = targetBoardId;
       const url = new URL(window.location.href);
       url.search = "";
       if (view === "student") url.searchParams.set("board", boardId);
@@ -2434,15 +2441,9 @@
 
       async function loadTeacherInk(materialId) {
         const targetMaterialId = String(materialId || state.activeMaterialId || legacyMaterialId(state.boardId));
-        if (!materialId) {
-         state.teacherInk.clear();
-         state.teacherInkVersions.clear();
-         teacherInkRevision.clear();
-         teacherInkSaveChains.clear();
-       } else {
-         const prefix = targetMaterialId + "|";
-         Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
-        }
+        const prefix = targetMaterialId + "|";
+        const revisionsAtStart = new Map();
+        teacherInkRevision.forEach(function (revision, key) { if (String(key).indexOf(prefix) === 0) revisionsAtStart.set(String(key), revision); });
         let result;
         const hasPendingMaterial = await hasPendingMaterialMutation(state.boardId, targetMaterialId);
         const hasLocalMaterial = state.materials.some(function (item) { return String(item.id) === targetMaterialId; });
@@ -2456,17 +2457,35 @@
             result = await localRequest("listInk", { boardId: state.boardId, materialId: targetMaterialId });
           }
         }
-       const rows = new Map((result.data || []).map(function (item) { return [String(item.id), item]; }));
-       (await pendingInkRows(state.boardId, targetMaterialId)).forEach(function (item) { rows.set(String(item.id), item); });
-       const prefix = targetMaterialId + "|";
-       Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
-       Array.from(rows.values()).forEach(function (item) {
-         const itemMaterialId = String(item.materialId || targetMaterialId);
-         state.teacherInk.set(materialInkKey(itemMaterialId, Number(item.page) || 1), Array.isArray(item.strokes) ? item.strokes : []);
-       });
-       state.teacherInkVersions.set(targetMaterialId, String(result.inkVersion || ""));
-       setInkStatus("手寫已載入");
-     }
+        const rows = new Map((result.data || []).map(function (item) { return [String(item.id), item]; }));
+        const pendingRows = await pendingInkRows(state.boardId, targetMaterialId);
+        pendingRows.forEach(function (item) { rows.set(String(item.id), item); });
+        const inkAtMerge = new Map();
+        state.teacherInk.forEach(function (strokes, key) { if (String(key).indexOf(prefix) === 0) inkAtMerge.set(String(key), JSON.parse(JSON.stringify(strokes || []))); });
+        const revisionsAtMerge = new Map();
+        teacherInkRevision.forEach(function (revision, key) { if (String(key).indexOf(prefix) === 0) revisionsAtMerge.set(String(key), revision); });
+        const preservedKeys = new Set(revisionsAtStart.keys());
+        revisionsAtMerge.forEach(function (revision, key) { preservedKeys.add(key); });
+        const pendingInk = new Map();
+        pendingRows.forEach(function (item) {
+          const itemMaterialId = String(item.materialId || targetMaterialId);
+          const key = materialInkKey(itemMaterialId, Number(item.page) || 1);
+          preservedKeys.add(key);
+          pendingInk.set(key, Array.isArray(item.strokes) ? item.strokes : []);
+        });
+        Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0 && !preservedKeys.has(String(key))) state.teacherInk.delete(key); });
+        Array.from(rows.values()).forEach(function (item) {
+          const itemMaterialId = String(item.materialId || targetMaterialId);
+          const key = materialInkKey(itemMaterialId, Number(item.page) || 1);
+          if (!preservedKeys.has(key)) state.teacherInk.set(key, Array.isArray(item.strokes) ? item.strokes : []);
+        });
+        preservedKeys.forEach(function (key) {
+          if (inkAtMerge.has(key)) state.teacherInk.set(key, inkAtMerge.get(key));
+          else if (pendingInk.has(key)) state.teacherInk.set(key, pendingInk.get(key));
+        });
+        state.teacherInkVersions.set(targetMaterialId, String(result.inkVersion || ""));
+        setInkStatus("手寫已載入");
+      }
 
     function teacherInkForPage(page, materialId) {
       return state.teacherInk.get(materialInkKey(materialId, page)) || [];
@@ -2489,7 +2508,7 @@
        const boardId = state.board ? String(state.board.id) : "";
        markTeacherInkChanged(page, materialId);
        window.clearTimeout(state.inkSaveTimer);
-       state.inkSaveTimer = window.setTimeout(function () { persistTeacherInk(page, boardId, materialId); }, 450);
+        state.inkSaveTimer = window.setTimeout(function () { persistTeacherInk(page, boardId, materialId); }, INK_SAVE_DELAY);
        setInkStatus("手寫暫存中");
      }
 
@@ -2503,7 +2522,7 @@
        const previous = teacherInkSaveChains.get(storageKey) || Promise.resolve();
        const task = previous.catch(function () {}).then(async function () {
          const strokes = JSON.parse(JSON.stringify(teacherInkForPage(key, targetMaterialId)));
-         const payload = { id: teacherInkId(targetBoardId, targetMaterialId, key), boardId: targetBoardId, materialId: targetMaterialId, page: key, strokes: strokes };
+          const payload = { id: teacherInkId(targetBoardId, targetMaterialId, key), boardId: targetBoardId, materialId: targetMaterialId, page: key, strokes: strokes, compact: true };
          try {
            const result = await commitLocalMutation("saveInk", payload);
            const isCurrent = teacherInkRevision.get(storageKey) === revision && state.board && String(state.board.id) === targetBoardId;
@@ -2543,7 +2562,9 @@
       const localPage = state.currentPage;
       const localZoom = state.zoom;
       let result;
-      const syncPayload = { boardId: state.boardId, materialId: requestedMaterialId, inkVersion: teacherInkVersionFor(requestedMaterialId) };
+      const includeSubmissionCounts = state.view !== "student" || Date.now() - state.lastClassroomCountsPollAt >= CLASSROOM_SUBMISSIONS_POLL_INTERVAL;
+      if (includeSubmissionCounts && state.view === "student") state.lastClassroomCountsPollAt = Date.now();
+      const syncPayload = { boardId: state.boardId, materialId: requestedMaterialId, inkVersion: teacherInkVersionFor(requestedMaterialId), inkDelta: "1", includeSubmissionCounts: includeSubmissionCounts ? "1" : "0" };
       try {
         result = state.demo ? await localRequest("classroomSync", syncPayload) : await gasGet("classroomSync", syncPayload);
       } catch (error) {
@@ -2588,9 +2609,16 @@
       if (result.inkVersion !== undefined) state.teacherInkVersions.set(requestedMaterialId, String(result.inkVersion || ""));
       if (result.inkChanged !== false && Array.isArray(result.ink)) {
         const prefix = requestedMaterialId + "|";
-        Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
+        const replaceInk = result.inkDelta !== true || result.inkReset === true;
+        if (replaceInk) Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
         result.ink.forEach(function (item) {
-          state.teacherInk.set(materialInkKey(item.materialId || requestedMaterialId, Number(item.page) || 1), Array.isArray(item.strokes) ? item.strokes : []);
+          const inkKey = materialInkKey(item.materialId || requestedMaterialId, Number(item.page) || 1);
+          if (!replaceInk && item.strokesMode === "append") {
+            const strokes = state.teacherInk.get(inkKey) || [];
+            state.teacherInk.set(inkKey, strokes.concat(Array.isArray(item.strokes) ? item.strokes : []));
+          } else {
+            state.teacherInk.set(inkKey, Array.isArray(item.strokes) ? item.strokes : []);
+          }
         });
         localRevisions.forEach(function (revision, key) {
           if (teacherInkRevision.get(key) === revision && localInk.has(key)) state.teacherInk.set(key, localInk.get(key));
@@ -4251,9 +4279,9 @@
           const bPayload = b.payload || {};
           const aBoardId = String(aPayload.boardId || aPayload.clientBoardId || "");
           const bBoardId = String(bPayload.boardId || bPayload.clientBoardId || "");
-          const aStatePriority = a.action === "saveClassroomState" && !pendingCatalogBoards.has(aBoardId) ? 0 : 1;
-          const bStatePriority = b.action === "saveClassroomState" && !pendingCatalogBoards.has(bBoardId) ? 0 : 1;
-          return aStatePriority - bStatePriority || (Number(a.sequence) || Date.parse(a.createdAt) || 0) - (Number(b.sequence) || Date.parse(b.createdAt) || 0);
+          const aSyncPriority = pendingCatalogBoards.has(aBoardId) ? 2 : (a.action === "saveClassroomState" ? 0 : (a.action === "saveInk" ? 1 : 2));
+          const bSyncPriority = pendingCatalogBoards.has(bBoardId) ? 2 : (b.action === "saveClassroomState" ? 0 : (b.action === "saveInk" ? 1 : 2));
+          return aSyncPriority - bSyncPriority || (Number(a.sequence) || Date.parse(a.createdAt) || 0) - (Number(b.sequence) || Date.parse(b.createdAt) || 0);
         });
         for (const item of items) {
           if (!(await isCurrentOutboxItem(item))) continue;
@@ -4482,8 +4510,8 @@
       state.activeAreaId = "";
       state.reviewSubmission = null;
       mountClassroomPdf();
-      await loadTeacherInk();
       bindClassroomPdfEvents();
+      await loadTeacherInk();
       renderReviewAreaList();
        await loadClassroomSync();
        await renderPdfPage();

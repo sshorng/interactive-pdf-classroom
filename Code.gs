@@ -73,6 +73,10 @@ const TABLE_CACHE_SECONDS = 8;
 const TABLE_CACHE_MAX_CHARS = 90000;
 const TABLE_CACHE_PREFIX = "pdfw_table_v2_materials_";
 const DATABASE_READY_CACHE_KEY = "pdfw_database_ready_v3_materials";
+const JSON_REFERENCE_CACHE_PREFIX = "pdfw_json_v1_";
+const JSON_REFERENCE_CACHE_SECONDS = 300;
+const INK_DELTA_CACHE_PREFIX = "pdfw_ink_delta_v1_";
+const INK_DELTA_CACHE_SECONDS = 300;
 
 function getSpreadsheet_() {
   const id = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
@@ -455,15 +459,36 @@ function storeJson_(value, purpose, boardId, submissionId, materialId) {
     mime: "application/json",
     data: Utilities.base64Encode(Utilities.newBlob(text).getBytes())
   }, purpose, boardId, submissionId, materialId);
-  return "drive:" + file.driveId;
+  const reference = "drive:" + file.driveId;
+  cacheJsonReference_(reference, text);
+  return reference;
+}
+
+function jsonReferenceCacheKey_(reference) {
+  return JSON_REFERENCE_CACHE_PREFIX + String(reference || "").slice(6);
+}
+
+function cacheJsonReference_(reference, text) {
+  try {
+    CacheService.getScriptCache().put(jsonReferenceCacheKey_(reference), String(text || ""), JSON_REFERENCE_CACHE_SECONDS);
+  } catch (error) {
+    // 大型 JSON 可能超過 CacheService 單筆大小限制，改由 Drive 讀取。
+  }
 }
 
 function readJsonReference_(value) {
   const text = String(value || "");
   if (text.indexOf("drive:") !== 0) return parseObject_(text, {});
+  let cached = "";
+  try {
+    cached = CacheService.getScriptCache().get(jsonReferenceCacheKey_(text));
+  } catch (error) {}
+  if (cached) return parseObject_(cached, {});
   try {
     const file = DriveApp.getFileById(text.slice(6));
-    return parseObject_(file.getBlob().getDataAsString("UTF-8"), {});
+    const parsed = parseObject_(file.getBlob().getDataAsString("UTF-8"), {});
+    cacheJsonReference_(text, JSON.stringify(parsed));
+    return parsed;
   } catch (error) {
     return {};
   }
@@ -614,19 +639,105 @@ function publicBoard_(board) {
   };
 }
 
-function publicInk_(item) {
+function publicInk_(item, strokesOverride) {
   return {
     id: item.id,
     boardId: item.boardId,
     materialId: item.materialId || legacyMaterialId_(item.boardId),
     page: Number(item.page) || 1,
-    strokes: readJsonReference_(item.strokes),
+    strokes: strokesOverride === undefined ? readJsonReference_(item.strokes) : strokesOverride,
     updatedAt: item.updatedAt
   };
 }
 
 function inkVersion_(rows) {
   return rows.map(function (item) { return String(item.id || "") + ":" + String(item.updatedAt || ""); }).sort().join("|");
+}
+
+function inkVersionMap_(value) {
+  const output = {};
+  String(value || "").split("|").forEach(function (entry) {
+    const delimiter = entry.indexOf(":");
+    if (delimiter < 1) return;
+    output[entry.slice(0, delimiter)] = entry.slice(delimiter + 1);
+  });
+  return output;
+}
+
+function inkDeltaCacheKey_(inkId) {
+  return INK_DELTA_CACHE_PREFIX + String(inkId || "");
+}
+
+function readInkDeltaRecords_(inkId) {
+  try {
+    return parseArray_(CacheService.getScriptCache().get(inkDeltaCacheKey_(inkId))).filter(function (record) { return record && typeof record === "object"; });
+  } catch (error) {
+    return [];
+  }
+}
+
+function clearInkDeltaRecords_(inkId) {
+  try {
+    CacheService.getScriptCache().remove(inkDeltaCacheKey_(inkId));
+  } catch (error) {}
+}
+
+function writeInkDeltaRecord_(inkId, baseVersion, version, strokes) {
+  try {
+    const records = readInkDeltaRecords_(inkId);
+    const last = records[records.length - 1];
+    const chain = !last || String(last.version || "") === String(baseVersion || "") ? records : [];
+    chain.push({ baseVersion: String(baseVersion || ""), version: String(version || ""), strokes: Array.isArray(strokes) ? strokes : [] });
+    CacheService.getScriptCache().put(inkDeltaCacheKey_(inkId), JSON.stringify(chain.slice(-12)), INK_DELTA_CACHE_SECONDS);
+  } catch (error) {
+    // 筆跡增量過大時改回傳完整筆跡，不影響保存結果。
+  }
+}
+
+function inkAppendDelta_(item, clientVersion) {
+  const targetVersion = String(clientVersion || "");
+  const currentVersion = String(item.updatedAt || "");
+  if (targetVersion === currentVersion) return null;
+  const records = readInkDeltaRecords_(item.id);
+  if (!records.length) return null;
+  const seen = {};
+  const strokes = [];
+  let version = targetVersion;
+  while (version !== currentVersion) {
+    if (seen[version]) return null;
+    seen[version] = true;
+    const record = records.find(function (candidate) { return String(candidate.baseVersion || "") === version; });
+    if (!record || String(record.version || "") === version || !Array.isArray(record.strokes)) return null;
+    record.strokes.forEach(function (stroke) { strokes.push(stroke); });
+    version = String(record.version || "");
+  }
+  return { strokes: strokes };
+}
+
+function publicInkDelta_(item, clientVersions) {
+  const delta = inkAppendDelta_(item, clientVersions[String(item.id)] || "");
+  if (!delta) return null;
+  const output = publicInk_(item, delta.strokes);
+  output.strokesMode = "append";
+  return output;
+}
+
+function compactPublicInk_(item) {
+  return {
+    id: item.id,
+    boardId: item.boardId,
+    materialId: item.materialId || legacyMaterialId_(item.boardId),
+    page: Number(item.page) || 1,
+    updatedAt: item.updatedAt
+  };
+}
+
+function strokesHavePrefix_(prefix, strokes) {
+  if (!Array.isArray(prefix) || !Array.isArray(strokes) || prefix.length > strokes.length) return false;
+  for (let index = 0; index < prefix.length; index += 1) {
+    if (JSON.stringify(prefix[index]) !== JSON.stringify(strokes[index])) return false;
+  }
+  return true;
 }
 
 function publicSubmission_(item, includePrivate, fallbackMaterialId) {
@@ -689,12 +800,22 @@ function saveInk_(payload) {
   const page = Math.max(1, Number(payload.page) || 1);
   const strokes = Array.isArray(payload.strokes) ? payload.strokes : [];
   const id = isLegacyMaterialId_(board, materialId) ? "INK-" + board.id + "-" + page : "INK-" + board.id + "-" + materialId + "-" + page;
-  const reference = storeJson_(strokes, "教師頁面手寫", board.id, id, materialId);
-  const item = { id: id, boardId: board.id, materialId: materialId, page: page, strokes: reference, updatedAt: now_() };
   const existing = readTable_("ink").find(function (row) { return String(row.id) === id; });
+  const previousValue = existing ? readJsonReference_(existing.strokes) : [];
+  const previousStrokes = Array.isArray(previousValue) ? previousValue : [];
+  const appendOnly = strokesHavePrefix_(previousStrokes, strokes);
+  const previousVersion = existing ? String(existing.updatedAt || "") : "";
+  let updatedAt = now_();
+  const previousTime = Date.parse(previousVersion);
+  const currentTime = Date.parse(updatedAt);
+  if (Number.isFinite(previousTime) && Number.isFinite(currentTime) && currentTime <= previousTime) updatedAt = new Date(previousTime + 1).toISOString();
+  const reference = storeJson_(strokes, "教師頁面手寫", board.id, id, materialId);
+  const item = { id: id, boardId: board.id, materialId: materialId, page: page, strokes: reference, updatedAt: updatedAt };
   if (existing) updateRow_("ink", id, item);
   else appendRow_("ink", item);
-  return { ok: true, annotation: publicInk_(item) };
+  if (appendOnly) writeInkDeltaRecord_(id, previousVersion, updatedAt, strokes.slice(previousStrokes.length));
+  else clearInkDeltaRecords_(id);
+  return { ok: true, annotation: payload.compact ? compactPublicInk_(item) : publicInk_(item) };
 }
 
 function publicClassroomState_(item, boardId) {
@@ -708,14 +829,14 @@ function publicClassroomState_(item, boardId) {
   };
 }
 
-function submissionCountsForBoard_(boardId, materialId) {
-  const board = getBoard_(boardId, false);
-  const areas = areasForBoard_(board.id, board);
+function submissionCountsForBoard_(boardId, materialId, board, areas) {
+  const targetBoard = board || getBoard_(boardId, false);
+  const targetAreas = areas || areasForBoard_(targetBoard.id, targetBoard);
   const areaMap = {};
-  areas.forEach(function (area) { areaMap[String(area.id)] = area; });
+  targetAreas.forEach(function (area) { areaMap[String(area.id)] = area; });
   const counts = {};
   readTable_("submissions").forEach(function (item) {
-    if (String(item.boardId) !== String(board.id)) return;
+    if (String(item.boardId) !== String(targetBoard.id)) return;
     const area = areaMap[String(item.areaId)];
     if (!area || (materialId && String(area.materialId) !== String(materialId))) return;
     counts[String(item.areaId)] = (counts[String(item.areaId)] || 0) + 1;
@@ -735,7 +856,15 @@ function classroomSync_(payload) {
     return String(item.boardId) === String(board.id) && String(item.materialId || legacyMaterialId_(board.id)) === requestedMaterialId;
   });
   const inkVersion = inkVersion_(inkRows);
-  const inkChanged = String(payload.inkVersion || "") !== inkVersion;
+  const clientInkVersion = String(payload.inkVersion || "");
+  const inkChanged = clientInkVersion !== inkVersion;
+  const useInkDelta = String(payload.inkDelta || "") === "1";
+  const clientInkVersions = inkVersionMap_(clientInkVersion);
+  const changedInkRows = inkChanged ? inkRows.filter(function (item) {
+    return String(clientInkVersions[String(item.id)] || "") !== String(item.updatedAt || "");
+  }) : [];
+  const areas = areasForBoard_(board.id, board);
+  const includeSubmissionCounts = String(payload.includeSubmissionCounts || "1") !== "0";
   const sharedState = publicClassroomState_(state, board.id);
   if (materials.length && !materials.some(function (item) { return String(item.id) === String(sharedState.materialId); })) sharedState.materialId = materials[0].id;
   return {
@@ -743,11 +872,13 @@ function classroomSync_(payload) {
     state: sharedState,
     inkVersion: inkVersion,
     inkChanged: inkChanged,
-    ink: inkChanged ? inkRows.map(publicInk_) : null,
+    ink: inkChanged ? (useInkDelta ? changedInkRows.map(function (item) { return publicInkDelta_(item, clientInkVersions) || publicInk_(item); }) : inkRows.map(publicInk_)) : null,
+    inkDelta: useInkDelta,
+    inkReset: useInkDelta && !clientInkVersion,
     materialId: requestedMaterialId,
     materials: materials,
-    areas: areasForBoard_(board.id, board),
-    submissionCounts: submissionCountsForBoard_(board.id, requestedMaterialId),
+    areas: areas,
+    submissionCounts: includeSubmissionCounts ? submissionCountsForBoard_(board.id, requestedMaterialId, board, areas) : null,
     serverTime: now_()
   };
 }
