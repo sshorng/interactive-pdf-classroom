@@ -43,7 +43,15 @@ const assert = (condition, message) => {
   const boardId = await evaluate("new URL(location.href).searchParams.get('board')");
   if (!boardId) throw new Error("目前頁面沒有 board 參數。");
   await evaluate("goView('student', new URL(location.href).searchParams.get('board'))");
-  await new Promise((resolve) => setTimeout(resolve, 1300));
+  const studentReady = await evaluate(`(async () => {
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      if (state.view === "student" && document.getElementById("studentNicknameField")) return true;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return false;
+  })()`);
+  if (!studentReady) throw new Error("學生介面未在期限內完成載入。");
 
    const result = await evaluate(`(async () => {
     const originalMaterials = state.materials;

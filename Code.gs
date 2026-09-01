@@ -786,7 +786,7 @@ function listInk_(payload) {
   });
   return {
     ok: true,
-    data: rows.map(publicInk_),
+    data: rows.map(function (item) { return publicInk_(item); }),
     inkVersion: inkVersion_(rows),
     serverTime: now_()
   };
@@ -803,6 +803,10 @@ function saveInk_(payload) {
   const existing = readTable_("ink").find(function (row) { return String(row.id) === id; });
   const previousValue = existing ? readJsonReference_(existing.strokes) : [];
   const previousStrokes = Array.isArray(previousValue) ? previousValue : [];
+  const explicitReplace = payload && (payload.replaceInk === true || String(payload.replaceInk || "") === "1");
+  if (existing && !explicitReplace && previousStrokes.length > strokes.length) {
+    return { ok: true, annotation: publicInk_(existing), preserved: true };
+  }
   const appendOnly = strokesHavePrefix_(previousStrokes, strokes);
   const previousVersion = existing ? String(existing.updatedAt || "") : "";
   let updatedAt = now_();
@@ -852,14 +856,20 @@ function classroomSync_(payload) {
   const requestedMaterial = payload.materialId ? materials.find(function (item) { return String(item.id) === String(payload.materialId); }) : null;
   const stateMaterialId = state && state.materialId ? String(state.materialId) : legacyMaterialId_(board.id);
   const requestedMaterialId = (requestedMaterial && requestedMaterial.id) || (materials.find(function (item) { return String(item.id) === stateMaterialId; }) || materials[0] || { id: legacyMaterialId_(board.id) }).id;
-  const inkRows = readTable_("ink").filter(function (item) {
+  const allInkRows = readTable_("ink").filter(function (item) {
     return String(item.boardId) === String(board.id) && String(item.materialId || legacyMaterialId_(board.id)) === requestedMaterialId;
   });
+  const rawInkPage = Number(payload.inkPage);
+  const inkPage = Number.isFinite(rawInkPage) && rawInkPage > 0 ? Math.max(1, Math.floor(rawInkPage)) : 0;
+  const inkRows = inkPage ? allInkRows.filter(function (item) { return (Number(item.page) || 1) === inkPage; }) : allInkRows;
   const inkVersion = inkVersion_(inkRows);
   const clientInkVersion = String(payload.inkVersion || "");
   const inkChanged = clientInkVersion !== inkVersion;
   const useInkDelta = String(payload.inkDelta || "") === "1";
   const clientInkVersions = inkVersionMap_(clientInkVersion);
+  const currentInkIds = {};
+  inkRows.forEach(function (item) { currentInkIds[String(item.id)] = true; });
+  const pageReset = inkPage > 0 && (!clientInkVersion || Object.keys(clientInkVersions).some(function (id) { return !currentInkIds[id]; }));
   const changedInkRows = inkChanged ? inkRows.filter(function (item) {
     return String(clientInkVersions[String(item.id)] || "") !== String(item.updatedAt || "");
   }) : [];
@@ -872,9 +882,10 @@ function classroomSync_(payload) {
     state: sharedState,
     inkVersion: inkVersion,
     inkChanged: inkChanged,
-    ink: inkChanged ? (useInkDelta ? changedInkRows.map(function (item) { return publicInkDelta_(item, clientInkVersions) || publicInk_(item); }) : inkRows.map(publicInk_)) : null,
+    ink: inkChanged ? (useInkDelta && !pageReset ? changedInkRows.map(function (item) { return publicInkDelta_(item, clientInkVersions) || publicInk_(item); }) : inkRows.map(function (item) { return publicInk_(item); })) : null,
     inkDelta: useInkDelta,
-    inkReset: useInkDelta && !clientInkVersion,
+    inkReset: useInkDelta && (inkPage > 0 ? pageReset : !clientInkVersion),
+    inkPage: inkPage,
     materialId: requestedMaterialId,
     materials: materials,
     areas: areas,

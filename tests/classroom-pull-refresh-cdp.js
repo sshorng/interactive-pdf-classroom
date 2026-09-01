@@ -51,11 +51,12 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
     const scroll = document.getElementById("editorPdfScroll");
     const stage = document.getElementById("pageStage");
+    const inkCanvas = document.getElementById("inkCanvas");
     const indicator = document.getElementById("pullRefreshIndicator");
     const hasBinding = typeof window.bindClassroomPullToRefresh === "function";
     const hasRefresh = typeof window.refreshClassroomView === "function";
     const hasClassroomPolling = typeof window.pollClassroomView === "function";
-    if (!scroll || !stage || !indicator) throw new Error("課堂下拉重整測試元件不存在。");
+    if (!scroll || !stage || !inkCanvas || !indicator) throw new Error("課堂下拉重整測試元件不存在。");
 
     if (state.pollTimer) {
       window.clearInterval(state.pollTimer);
@@ -144,7 +145,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     await wait(100);
     const stylusPullIgnored = syncCalls === callsAfterTopPull;
 
-    stage.dispatchEvent(new PointerEvent("pointerdown", {
+    inkCanvas.dispatchEvent(new PointerEvent("pointerdown", {
       bubbles: true,
       cancelable: true,
       pointerId: 2201,
@@ -158,7 +159,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     setScrollTop(0);
     pull(2104);
     await wait(100);
-    stage.dispatchEvent(new PointerEvent("pointercancel", {
+    inkCanvas.dispatchEvent(new PointerEvent("pointercancel", {
       bubbles: true,
       cancelable: true,
       pointerId: 2201,

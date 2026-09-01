@@ -1504,7 +1504,12 @@
         const board = await localGet("boards", data.boardId);
         if (!board) throw new Error("找不到指定教材版面。");
         const materialId = String(data.materialId || legacyMaterialId(board.id));
-        const annotation = { id: data.id || (isLegacyMaterialId(materialId, board.id) ? "INK-" + board.id + "-" + (Number(data.page) || 1) : "INK-" + board.id + "-" + materialId + "-" + (Number(data.page) || 1)), boardId: board.id, materialId: materialId, page: Math.max(1, Number(data.page) || 1), strokes: Array.isArray(data.strokes) ? data.strokes : [], updatedAt: new Date().toISOString() };
+        const id = data.id || (isLegacyMaterialId(materialId, board.id) ? "INK-" + board.id + "-" + (Number(data.page) || 1) : "INK-" + board.id + "-" + materialId + "-" + (Number(data.page) || 1));
+        const strokes = Array.isArray(data.strokes) ? data.strokes : [];
+        const existing = await localGet("ink", id);
+        const explicitReplace = data.replaceInk === true || String(data.replaceInk || "") === "1";
+        if (existing && !explicitReplace && Array.isArray(existing.strokes) && existing.strokes.length > strokes.length) return { ok: true, annotation: existing, preserved: true };
+        const annotation = { id: id, boardId: board.id, materialId: materialId, page: Math.max(1, Number(data.page) || 1), strokes: strokes, updatedAt: new Date().toISOString() };
         await localPut("ink", annotation);
         return { ok: true, annotation: annotation };
       }
@@ -1515,14 +1520,16 @@
         const inkRows = (await localAll("ink")).filter(function (item) { return String(item.boardId) === String(board.id); });
         const stateMaterialId = String(classroomState && classroomState.materialId || legacyMaterialId(board.id));
         const materialId = String(data.materialId || stateMaterialId);
-        const rows = inkRows.filter(function (item) { return String(item.materialId || legacyMaterialId(board.id)) === materialId; }).map(function (item) { return Object.assign({}, item, { materialId: String(item.materialId || legacyMaterialId(board.id)) }); });
+        const rawInkPage = Number(data.inkPage);
+        const inkPage = Number.isFinite(rawInkPage) && rawInkPage > 0 ? Math.max(1, Math.floor(rawInkPage)) : 0;
+        const rows = inkRows.filter(function (item) { return String(item.materialId || legacyMaterialId(board.id)) === materialId && (!inkPage || (Number(item.page) || 1) === inkPage); }).map(function (item) { return Object.assign({}, item, { materialId: String(item.materialId || legacyMaterialId(board.id)) }); });
          const inkVersion = localInkVersion(rows);
          const inkChanged = String(data.inkVersion || "") !== inkVersion;
          const sharedState = classroomState || { id: "STATE-" + board.id, boardId: board.id, materialId: legacyMaterialId(board.id), page: 1, zoom: 1, updatedAt: "" };
          const materials = normalizeMaterials(board, board.materials);
          const publicState = Object.assign({}, sharedState, { materialId: String(sharedState.materialId || legacyMaterialId(board.id)) });
          if (materials.length && !materials.some(function (item) { return String(item.id) === String(publicState.materialId); })) publicState.materialId = materials[0].id;
-         return { ok: true, state: publicState, inkVersion: inkVersion, inkChanged: inkChanged, ink: inkChanged ? rows : null, materialId: materialId, materials: materials, areas: normalizeAreas(board.areas || [], board.id), submissionCounts: await localSubmissionCounts(board.id, materialId) };
+          return { ok: true, state: publicState, inkVersion: inkVersion, inkChanged: inkChanged, ink: inkChanged ? rows : null, inkDelta: false, inkReset: inkChanged, inkPage: inkPage, materialId: materialId, materials: materials, areas: normalizeAreas(board.areas || [], board.id), submissionCounts: String(data.includeSubmissionCounts || "1") === "0" ? null : await localSubmissionCounts(board.id, materialId) };
       }
       if (action === "saveClassroomState") {
         const board = await localGet("boards", data.boardId);
@@ -1804,7 +1811,7 @@
       const result = await localRequest(action, payload || {});
       if (!state.demo) {
         const saved = result && (result.submission || result.annotation || result.state || result.board);
-        await queueOutbox(action, payload || {}, saved && saved.updatedAt);
+        if (!result || !result.preserved) await queueOutbox(action, payload || {}, saved && saved.updatedAt);
         window.setTimeout(function () { flushOutbox(); }, 0);
       }
       return result;
@@ -2046,6 +2053,9 @@
       state.teacherInk.clear();
       teacherInkRevision.clear();
       teacherInkSaveChains.clear();
+      teacherInkSaveTimers.forEach(function (timer) { window.clearTimeout(timer); });
+      teacherInkSaveTimers.clear();
+      teacherInkSaveModes.clear();
       state.teacherInkVersions.clear();
       state.submissionCounts.clear();
       state.classroomStateRevision = 0;
@@ -2462,7 +2472,17 @@
             result = await localRequest("listInk", { boardId: state.boardId, materialId: targetMaterialId });
           }
         }
-        const rows = new Map((result.data || []).map(function (item) { return [String(item.id), item]; }));
+        let listResult = result;
+        const hasInvalidStrokes = Array.isArray(result.data) && result.data.some(function (item) { return !Array.isArray(item.strokes); });
+        if (hasInvalidStrokes && !state.demo) {
+          try {
+            const fallback = await gasGet("classroomSync", { boardId: state.boardId, materialId: targetMaterialId, inkPage: 0, inkVersion: "", inkDelta: "1", includeSubmissionCounts: "0" });
+            if (Array.isArray(fallback.ink)) listResult = { data: fallback.ink, inkVersion: fallback.inkVersion };
+          } catch (error) {
+            // 舊版 GAS 回應格式錯誤時，保留原本資料並等待下次同步或新版部署。
+          }
+        }
+        const rows = new Map((listResult.data || []).map(function (item) { return [String(item.id), item]; }));
         const pendingRows = await pendingInkRows(state.boardId, targetMaterialId);
         pendingRows.forEach(function (item) { rows.set(String(item.id), item); });
         const inkAtMerge = new Map();
@@ -2488,11 +2508,48 @@
           if (inkAtMerge.has(key)) state.teacherInk.set(key, inkAtMerge.get(key));
           else if (pendingInk.has(key)) state.teacherInk.set(key, pendingInk.get(key));
         });
-        state.teacherInkVersions.set(targetMaterialId, String(result.inkVersion || ""));
-        setInkStatus("手寫已載入");
-      }
+        state.teacherInkVersions.set(targetMaterialId, String(listResult.inkVersion || ""));
+         setInkStatus("手寫已載入");
+       }
 
-    function teacherInkForPage(page, materialId) {
+       async function loadCachedTeacherInk(materialId) {
+         if (!state.boardId) return;
+         const targetMaterialId = String(materialId || state.activeMaterialId || legacyMaterialId(state.boardId));
+         const rows = await localAll("ink");
+         rows.filter(function (item) {
+           return String(item.boardId) === String(state.boardId) && String(item.materialId || legacyMaterialId(state.boardId)) === targetMaterialId;
+         }).forEach(function (item) {
+           state.teacherInk.set(materialInkKey(targetMaterialId, Number(item.page) || 1), Array.isArray(item.strokes) ? item.strokes : []);
+         });
+       }
+
+       async function cacheTeacherInkFromSync(materialId, result) {
+         if (!state.boardId || !result || result.inkChanged === false) return;
+         const targetMaterialId = String(materialId || state.activeMaterialId || legacyMaterialId(state.boardId));
+         const pages = new Map();
+         (Array.isArray(result.ink) ? result.ink : []).forEach(function (item) {
+           const page = Number(item.page) || 1;
+           pages.set(page, item);
+         });
+         const inkPage = Number(result.inkPage) || 0;
+         if (inkPage > 0 && !pages.has(inkPage)) pages.set(inkPage, null);
+         await Promise.all(Array.from(pages.entries()).map(async function (entry) {
+           const page = entry[0];
+           const item = entry[1];
+           const key = materialInkKey(targetMaterialId, page);
+           const strokes = JSON.parse(JSON.stringify(state.teacherInk.get(key) || []));
+           await localPut("ink", {
+             id: item && item.id || teacherInkId(state.boardId, targetMaterialId, page),
+             boardId: state.boardId,
+             materialId: targetMaterialId,
+             page: page,
+             strokes: strokes,
+             updatedAt: item && item.updatedAt || new Date().toISOString()
+           });
+         }));
+       }
+
+     function teacherInkForPage(page, materialId) {
       return state.teacherInk.get(materialInkKey(materialId, page)) || [];
     }
 
@@ -2507,48 +2564,69 @@
        return isLegacyMaterialId(targetMaterialId, boardId) ? "INK-" + boardId + "-" + (Number(page) || 1) : "INK-" + boardId + "-" + targetMaterialId + "-" + (Number(page) || 1);
      }
 
-     function scheduleTeacherInkSave() {
-       const page = Number(state.currentPage) || 1;
-       const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
-       const boardId = state.board ? String(state.board.id) : "";
-       markTeacherInkChanged(page, materialId);
-       window.clearTimeout(state.inkSaveTimer);
-        state.inkSaveTimer = window.setTimeout(function () { persistTeacherInk(page, boardId, materialId); }, INK_SAVE_DELAY);
-       setInkStatus("手寫暫存中");
-     }
+      function cancelTeacherInkSave(storageKey) {
+        const timer = teacherInkSaveTimers.get(storageKey);
+        if (timer !== undefined) window.clearTimeout(timer);
+        teacherInkSaveTimers.delete(storageKey);
+        teacherInkSaveModes.delete(storageKey);
+        if (state.inkSaveTimer === timer) state.inkSaveTimer = null;
+      }
 
-     function persistTeacherInk(page, boardId, materialId) {
-       const key = Number(page) || 1;
-       const targetBoardId = String(boardId || (state.board && state.board.id) || "");
-       const targetMaterialId = String(materialId || state.activeMaterialId || legacyMaterialId(targetBoardId));
-       const storageKey = materialInkKey(targetMaterialId, key);
-       if (!targetBoardId) return Promise.resolve();
-       const revision = teacherInkRevision.get(storageKey) || 0;
-       const previous = teacherInkSaveChains.get(storageKey) || Promise.resolve();
-       const task = previous.catch(function () {}).then(async function () {
-         const strokes = JSON.parse(JSON.stringify(teacherInkForPage(key, targetMaterialId)));
+      function scheduleTeacherInkSave(options) {
+        const settings = options || {};
+        const page = Number(state.currentPage) || 1;
+        const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
+        const boardId = state.board ? String(state.board.id) : "";
+        const storageKey = materialInkKey(materialId, page);
+        markTeacherInkChanged(page, materialId);
+        cancelTeacherInkSave(storageKey);
+        if (settings.replace) teacherInkSaveModes.set(storageKey, true);
+        const timer = window.setTimeout(function () {
+          teacherInkSaveTimers.delete(storageKey);
+          const replace = teacherInkSaveModes.get(storageKey) === true;
+          teacherInkSaveModes.delete(storageKey);
+          if (state.inkSaveTimer === timer) state.inkSaveTimer = null;
+          persistTeacherInk(page, boardId, materialId, { replace: replace });
+        }, INK_SAVE_DELAY);
+        teacherInkSaveTimers.set(storageKey, timer);
+        state.inkSaveTimer = timer;
+        setInkStatus("手寫暫存中");
+      }
+
+      function persistTeacherInk(page, boardId, materialId, options) {
+        const settings = options || {};
+        const key = Number(page) || 1;
+        const targetBoardId = String(boardId || (state.board && state.board.id) || "");
+        const targetMaterialId = String(materialId || state.activeMaterialId || legacyMaterialId(targetBoardId));
+        const storageKey = materialInkKey(targetMaterialId, key);
+        if (!targetBoardId) return Promise.resolve();
+        const revision = teacherInkRevision.get(storageKey) || 0;
+        const previous = teacherInkSaveChains.get(storageKey) || Promise.resolve();
+        const task = previous.catch(function () {}).then(async function () {
+          const strokes = JSON.parse(JSON.stringify(teacherInkForPage(key, targetMaterialId)));
           const payload = { id: teacherInkId(targetBoardId, targetMaterialId, key), boardId: targetBoardId, materialId: targetMaterialId, page: key, strokes: strokes, compact: true };
-         try {
-           const result = await commitLocalMutation("saveInk", payload);
-           const isCurrent = teacherInkRevision.get(storageKey) === revision && state.board && String(state.board.id) === targetBoardId;
-           if (isCurrent) {
-             if (result.annotation && targetMaterialId === String(state.activeMaterialId) && Number(key) === Number(state.currentPage)) state.teacherInk.set(storageKey, result.annotation.strokes || strokes);
-             teacherInkRevision.delete(storageKey);
-             setInkStatus(state.demo ? "手寫已保存" : "手寫已本機保存，背景同步中");
-           }
-         } catch (error) {
-           const isCurrent = teacherInkRevision.get(storageKey) === revision && state.board && String(state.board.id) === targetBoardId;
-           if (!isCurrent) return;
-           setInkStatus("手寫本機保存失敗");
-           await showModal("手寫保存失敗", error.message || "請稍後再試。", "error");
-         }
-       });
-       let tracked = task.finally(function () {
-         if (teacherInkSaveChains.get(storageKey) === tracked) teacherInkSaveChains.delete(storageKey);
-       });
-       teacherInkSaveChains.set(storageKey, tracked);
-       return tracked;
-     }
+          if (settings.replace) payload.replaceInk = "1";
+          try {
+            const result = await commitLocalMutation("saveInk", payload);
+            const isCurrent = teacherInkRevision.get(storageKey) === revision && state.board && String(state.board.id) === targetBoardId;
+            if (isCurrent) {
+              if (result.annotation && targetMaterialId === String(state.activeMaterialId) && Number(key) === Number(state.currentPage)) state.teacherInk.set(storageKey, result.annotation.strokes || strokes);
+              teacherInkRevision.delete(storageKey);
+              setInkStatus(state.demo ? "手寫已保存" : "手寫已本機保存，背景同步中");
+            }
+          } catch (error) {
+            const isCurrent = teacherInkRevision.get(storageKey) === revision && state.board && String(state.board.id) === targetBoardId;
+            if (!isCurrent) return;
+            setInkStatus("手寫本機保存失敗");
+            await showModal("手寫保存失敗", error.message || "請稍後再試。", "error");
+          }
+        });
+        let tracked = task.finally(function () {
+          if (teacherInkSaveChains.get(storageKey) === tracked) teacherInkSaveChains.delete(storageKey);
+        });
+        teacherInkSaveChains.set(storageKey, tracked);
+        return tracked;
+      }
 
      function applySubmissionCounts(counts) {
        state.submissionCounts.clear();
@@ -2569,7 +2647,7 @@
       let result;
       const includeSubmissionCounts = state.view !== "student" || Date.now() - state.lastClassroomCountsPollAt >= CLASSROOM_SUBMISSIONS_POLL_INTERVAL;
       if (includeSubmissionCounts && state.view === "student") state.lastClassroomCountsPollAt = Date.now();
-      const syncPayload = { boardId: state.boardId, materialId: requestedMaterialId, inkVersion: teacherInkVersionFor(requestedMaterialId), inkDelta: "1", includeSubmissionCounts: includeSubmissionCounts ? "1" : "0" };
+       const syncPayload = { boardId: state.boardId, materialId: requestedMaterialId, inkPage: Number(state.currentPage) || 1, inkVersion: teacherInkVersionFor(requestedMaterialId), inkDelta: "1", includeSubmissionCounts: includeSubmissionCounts ? "1" : "0" };
       try {
         result = state.demo ? await localRequest("classroomSync", syncPayload) : await gasGet("classroomSync", syncPayload);
       } catch (error) {
@@ -2581,7 +2659,7 @@
           return;
         }
       }
-      if (viewAtStart !== state.view || String(state.boardId) !== String(syncPayload.boardId)) return;
+      if (viewAtStart !== state.view || String(state.boardId) !== String(syncPayload.boardId) || String(state.activeMaterialId || legacyMaterialId(state.boardId)) !== requestedMaterialId) return;
       const hasPendingCatalogMutation = await hasPendingBoardMutation(state.boardId);
       const previousActiveMaterial = activeMaterial();
       let activeMaterialMissing = false;
@@ -2612,10 +2690,16 @@
       if (pendingState) result.state = pendingState;
       if (result.submissionCounts) applySubmissionCounts(result.submissionCounts);
       if (result.inkVersion !== undefined) state.teacherInkVersions.set(requestedMaterialId, String(result.inkVersion || ""));
+      let inkApplied = false;
       if (result.inkChanged !== false && Array.isArray(result.ink)) {
+        inkApplied = true;
         const prefix = requestedMaterialId + "|";
         const replaceInk = result.inkDelta !== true || result.inkReset === true;
-        if (replaceInk) Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
+        const inkPage = Number(result.inkPage) || 0;
+        if (replaceInk) {
+          if (inkPage > 0) state.teacherInk.delete(materialInkKey(requestedMaterialId, inkPage));
+          else Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
+        }
         result.ink.forEach(function (item) {
           const inkKey = materialInkKey(item.materialId || requestedMaterialId, Number(item.page) || 1);
           if (!replaceInk && item.strokesMode === "append") {
@@ -2625,10 +2709,11 @@
             state.teacherInk.set(inkKey, Array.isArray(item.strokes) ? item.strokes : []);
           }
         });
-        localRevisions.forEach(function (revision, key) {
-          if (teacherInkRevision.get(key) === revision && localInk.has(key)) state.teacherInk.set(key, localInk.get(key));
-        });
-      }
+         localRevisions.forEach(function (revision, key) {
+           if (teacherInkRevision.get(key) === revision && localInk.has(key)) state.teacherInk.set(key, localInk.get(key));
+         });
+         cacheTeacherInkFromSync(requestedMaterialId, result).catch(function () {});
+       }
       const shared = result.state || {};
       const sharedMaterialId = String(shared.materialId || legacyMaterialId(state.boardId));
       const maxPage = state.pdf ? state.pdf.numPages : Math.max(1, Number(shared.page) || 1);
@@ -2653,7 +2738,7 @@
         renderMaterialControls();
         renderStudentAreaList();
         renderZones();
-        renderTeacherInk();
+         if (inkApplied) renderTeacherInk();
         return;
       }
       if (sharedMaterialId !== String(state.activeMaterialId)) {
@@ -2662,21 +2747,23 @@
         }
         return;
       }
-      const stateChangedDuringSync = state.classroomStateRevision !== localStateRevision;
-      const remoteMatchesLocal = Number(localPage) === Number(nextPage) && Number(localZoom) === Number(nextZoom);
-      const preserveLocalState = state.classroomStateRevision > 0 && (stateChangedDuringSync || !remoteMatchesLocal);
-      if (!preserveLocalState) {
-        const pageChanged = Number(state.currentPage) !== Number(nextPage);
-        const zoomChanged = Number(state.zoom) !== Number(nextZoom);
-        state.currentPage = nextPage;
-        state.zoom = nextZoom;
-        if (state.classroomStateRevision > 0 && remoteMatchesLocal) state.classroomStateRevision = 0;
-        if (pageChanged || zoomChanged) await renderPdfPage();
-        else { renderTeacherInk(); updatePdfToolbar(); }
-      } else {
-        renderTeacherInk();
-        updatePdfToolbar();
-      }
+       const stateChangedDuringSync = state.classroomStateRevision !== localStateRevision;
+       const remoteMatchesLocal = Number(localPage) === Number(nextPage) && Number(localZoom) === Number(nextZoom);
+       const preserveLocalState = state.classroomStateRevision > 0 && (stateChangedDuringSync || !remoteMatchesLocal);
+       let pageChanged = false;
+       let zoomChanged = false;
+       if (!preserveLocalState) {
+         pageChanged = Number(state.currentPage) !== Number(nextPage);
+         zoomChanged = Number(state.zoom) !== Number(nextZoom);
+         state.currentPage = nextPage;
+         state.zoom = nextZoom;
+         if (state.classroomStateRevision > 0 && remoteMatchesLocal) state.classroomStateRevision = 0;
+         if (pageChanged || zoomChanged) await renderPdfPage();
+         else { if (inkApplied) renderTeacherInk(); updatePdfToolbar(); }
+       } else {
+         if (inkApplied) renderTeacherInk();
+         updatePdfToolbar();
+       }
       renderMaterialControls();
       renderReviewAreaList();
     }
@@ -2805,10 +2892,11 @@
         state.currentPage = 1;
         state.zoom = 1;
       }
-      await loadMaterialPdf(state.activeMaterialId);
-      if (state.pdf) state.currentPage = clamp(Number(state.currentPage) || 1, 1, state.pdf.numPages);
-      if (settings.zoom !== undefined) state.zoom = clamp(Number(settings.zoom) || 1, .5, 3.0);
-      state.selectedAreaId = "";
+       await loadMaterialPdf(state.activeMaterialId);
+       if (state.pdf) state.currentPage = clamp(Number(state.currentPage) || 1, 1, state.pdf.numPages);
+       if (settings.zoom !== undefined) state.zoom = clamp(Number(settings.zoom) || 1, .5, 3.0);
+       if (state.view === "student") await loadCachedTeacherInk(state.activeMaterialId);
+       state.selectedAreaId = "";
       state.activeAreaId = "";
       if (state.view === "editor" || state.view === "review") await loadTeacherInk(state.activeMaterialId);
       renderMaterialControls();
@@ -2873,7 +2961,7 @@
       strokes.pop();
       state.teacherInk.set(materialInkKey(materialId, page), strokes);
       renderTeacherInk();
-      scheduleTeacherInkSave();
+      scheduleTeacherInkSave({ replace: true });
     }
 
     async function clearTeacherInk() {
@@ -2882,9 +2970,10 @@
       const page = Number(state.currentPage) || 1;
       const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
       state.teacherInk.set(materialInkKey(materialId, page), []);
+      cancelTeacherInkSave(materialInkKey(materialId, page));
       markTeacherInkChanged(page, materialId);
       renderTeacherInk();
-      await persistTeacherInk(page, state.board && state.board.id, materialId);
+      await persistTeacherInk(page, state.board && state.board.id, materialId, { replace: true });
     }
 
     async function clearAllTeacherInk() {
@@ -2896,8 +2985,9 @@
       Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
       renderTeacherInk();
       for (const page of pages) {
+        cancelTeacherInkSave(materialInkKey(materialId, page));
         markTeacherInkChanged(page, materialId);
-        await persistTeacherInk(page, state.board && state.board.id, materialId);
+        await persistTeacherInk(page, state.board && state.board.id, materialId, { replace: true });
       }
     }
 
@@ -2939,6 +3029,8 @@
 
     const teacherInkRevision = new Map();
     const teacherInkSaveChains = new Map();
+    const teacherInkSaveTimers = new Map();
+    const teacherInkSaveModes = new Map();
 
     function isStylusTouch(touch) {
       const type = String(touch && touch.touchType || "").toLowerCase();
@@ -3220,7 +3312,7 @@
       }
       if (teacherInkErasing) {
         teacherInkErasing = false;
-        if (teacherInkChanged) scheduleTeacherInkSave();
+         if (teacherInkChanged) scheduleTeacherInkSave({ replace: true });
         teacherInkChanged = false;
         return;
       }
@@ -3810,11 +3902,12 @@
       else scheduleClassroomStateSave();
     }
 
-    async function renderStudentView(boardId) {
-      const main = document.getElementById("appMain");
-      main.innerHTML = "<div class=\"loading-wrap loading\">正在開啟學生作答頁</div>";
-       await loadBoardContext(boardId);
-       main.innerHTML = "<section class=\"student-shell\"><div class=\"student-banner\"><div><p class=\"eyebrow\">STUDENT RESPONSE</p><h1>" + escapeHtml(state.board.name) + "</h1><p>點擊 PDF 上的問答區，拍照或輸入文字完成作答。</p></div><div class=\"student-identity\"><label for=\"studentNicknameField\">你的暱稱</label><input id=\"studentNicknameField\" maxlength=\"40\" placeholder=\"例如：第一組\" value=\"" + escapeHtml(state.nickname) + "\"></div></div><div class=\"offline-note\">目前離線，送出的答案會先保留在這台裝置，網路恢復後自動補傳。</div><div class=\"workspace-shell student-workspace\"><div class=\"pdf-workspace\"><section class=\"pdf-main\"><div class=\"pdf-toolbar\"><div class=\"toolbar-group\"><button class=\"toolbar-button\" id=\"studentPrevPage\" type=\"button\">‹</button><span class=\"toolbar-label\" id=\"pageLabel\">第 1 頁</span><button class=\"toolbar-button\" id=\"studentNextPage\" type=\"button\">›</button></div><div class=\"toolbar-group\"><button class=\"toolbar-button\" id=\"studentZoomOut\" type=\"button\">−</button><span class=\"toolbar-label\" id=\"zoomLabel\">100％</span><button class=\"toolbar-button\" id=\"studentZoomIn\" type=\"button\">＋</button><button class=\"toolbar-button\" id=\"studentFit\" type=\"button\">適合</button></div></div><div class=\"pdf-scroll\"><div class=\"page-stage\" id=\"pageStage\"><canvas id=\"pdfCanvas\"></canvas><div class=\"zone-layer\" id=\"zoneLayer\"></div></div></div></section><aside class=\"workspace-sidebar\"><div class=\"sidebar-title\"><span>問答區</span><span class=\"meta-chip\" id=\"studentProgress\">尚未作答</span></div><div class=\"area-list\" id=\"studentAreaList\"></div><div class=\"answer-panel\" id=\"answerPanel\"><div class=\"answer-panel-empty\"><div><strong>從 PDF 選一個問答區</strong><span>你的答案會和這份教材版面分開保存。</span></div></div></div></aside></div></div></div></section>";
+     async function renderStudentView(boardId) {
+       const main = document.getElementById("appMain");
+       main.innerHTML = "<div class=\"loading-wrap loading\">正在開啟學生作答頁</div>";
+        await loadBoardContext(boardId);
+        await loadCachedTeacherInk(state.activeMaterialId);
+        main.innerHTML = "<section class=\"student-shell\"><div class=\"student-banner\"><div><p class=\"eyebrow\">STUDENT RESPONSE</p><h1>" + escapeHtml(state.board.name) + "</h1><p>點擊 PDF 上的問答區，拍照或輸入文字完成作答。</p></div><div class=\"student-identity\"><label for=\"studentNicknameField\">你的暱稱</label><input id=\"studentNicknameField\" maxlength=\"40\" placeholder=\"例如：第一組\" value=\"" + escapeHtml(state.nickname) + "\"></div></div><div class=\"offline-note\">目前離線，送出的答案會先保留在這台裝置，網路恢復後自動補傳。</div><div class=\"workspace-shell student-workspace\"><div class=\"pdf-workspace\"><section class=\"pdf-main\"><div class=\"pdf-toolbar\"><div class=\"toolbar-group\"><button class=\"toolbar-button\" id=\"studentPrevPage\" type=\"button\">‹</button><span class=\"toolbar-label\" id=\"pageLabel\">第 1 頁</span><button class=\"toolbar-button\" id=\"studentNextPage\" type=\"button\">›</button></div><div class=\"toolbar-group\"><button class=\"toolbar-button\" id=\"studentZoomOut\" type=\"button\">−</button><span class=\"toolbar-label\" id=\"zoomLabel\">100％</span><button class=\"toolbar-button\" id=\"studentZoomIn\" type=\"button\">＋</button><button class=\"toolbar-button\" id=\"studentFit\" type=\"button\">適合</button></div></div><div class=\"pdf-scroll\"><div class=\"page-stage\" id=\"pageStage\"><canvas id=\"pdfCanvas\"></canvas><div class=\"zone-layer\" id=\"zoneLayer\"></div></div></div></section><aside class=\"workspace-sidebar\"><div class=\"sidebar-title\"><span>問答區</span><span class=\"meta-chip\" id=\"studentProgress\">尚未作答</span></div><div class=\"area-list\" id=\"studentAreaList\"></div><div class=\"answer-panel\" id=\"answerPanel\"><div class=\"answer-panel-empty\"><div><strong>從 PDF 選一個問答區</strong><span>你的答案會和這份教材版面分開保存。</span></div></div></div></aside></div></div></div></section>";
        const studentSidebar = main.querySelector(".student-workspace .workspace-sidebar");
        const studentAreaList = document.getElementById("studentAreaList");
        const studentAnswerPanel = document.getElementById("answerPanel");
@@ -4519,6 +4612,7 @@
       renderReviewAreaList();
        await loadClassroomSync();
        await renderPdfPage();
+       renderTeacherInk();
        document.getElementById("reviewBackButton").addEventListener("click", function () { goView("manager"); });
        ["exportJsonButton", "exportCsvButton"].forEach(function (id) { const button = document.getElementById(id); if (button) button.remove(); });
        await loadReviewSubmissions();

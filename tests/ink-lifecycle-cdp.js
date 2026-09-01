@@ -75,54 +75,59 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     };
     const pageStage = document.getElementById("pageStage");
     const pdfCanvas = document.getElementById("pdfCanvas");
-    if (!pageStage || !pdfCanvas) throw new Error("教師 page stage 不存在。");
+    const inkCanvas = document.getElementById("inkCanvas");
+    if (!pageStage || !pdfCanvas || !inkCanvas) throw new Error("教師 page stage 不存在。");
+    const realCommitLocalMutation = window.commitLocalMutation;
+    window.commitLocalMutation = async function (action, payload) {
+      return { ok: true, annotation: { strokes: payload && Array.isArray(payload.strokes) ? payload.strokes : [] } };
+    };
 
     resetTeacher();
-    stroke(pdfCanvas, 1001, 250, 220);
-    stroke(pdfCanvas, 1002, 255, 223);
+    stroke(inkCanvas, 1001, 250, 220);
+    stroke(inkCanvas, 1002, 255, 223);
     await wait(360);
      const teacherSeparateStrokes = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 2;
 
     resetTeacher();
-    pageStage.dispatchEvent(makePointer("pointerdown", 1003, 300, 260));
-    pageStage.dispatchEvent(makePointer("pointercancel", 1003, 300, 260));
+    inkCanvas.dispatchEvent(makePointer("pointerdown", 1003, 300, 260));
+    inkCanvas.dispatchEvent(makePointer("pointercancel", 1003, 300, 260));
     await wait(360);
      const teacherShortCancel = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 1 && teacherInkForPage(state.currentPage, state.activeMaterialId)[0].points.length >= 1;
 
     resetTeacher();
-    pageStage.dispatchEvent(makePointer("pointerdown", 1004, 340, 300));
-    pageStage.dispatchEvent(makePointer("pointermove", 1004, 360, 308));
-    pageStage.dispatchEvent(makePointer("pointerdown", 1005, 430, 340));
-    pageStage.dispatchEvent(makePointer("pointermove", 1005, 450, 348));
-    pageStage.dispatchEvent(makePointer("pointerup", 1005, 450, 348));
+    inkCanvas.dispatchEvent(makePointer("pointerdown", 1004, 340, 300));
+    inkCanvas.dispatchEvent(makePointer("pointermove", 1004, 360, 308));
+    inkCanvas.dispatchEvent(makePointer("pointerdown", 1005, 430, 340));
+    inkCanvas.dispatchEvent(makePointer("pointermove", 1005, 450, 348));
+    inkCanvas.dispatchEvent(makePointer("pointerup", 1005, 450, 348));
     await wait(360);
      const teacherStaleRecovery = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 2 && teacherInkActivePointerId === null;
 
     resetTeacher();
-    pageStage.dispatchEvent(makePointer("pointerdown", 1008, 470, 360));
-    pageStage.dispatchEvent(makePointer("pointermove", 1008, 490, 368));
-    pageStage.dispatchEvent(makePointer("pointermove", 1008, 500, 370, "pen", 0, 0));
-    pageStage.dispatchEvent(makePointer("pointerover", 1009, 540, 390, "pen", .5, 1));
-    pageStage.dispatchEvent(makePointer("pointermove", 1009, 560, 398, "pen", .5, 1));
-    pageStage.dispatchEvent(makePointer("pointerup", 1009, 560, 398, "pen", 0, 0));
+    inkCanvas.dispatchEvent(makePointer("pointerdown", 1008, 470, 360));
+    inkCanvas.dispatchEvent(makePointer("pointermove", 1008, 490, 368));
+    inkCanvas.dispatchEvent(makePointer("pointermove", 1008, 500, 370, "pen", 0, 0));
+    inkCanvas.dispatchEvent(makePointer("pointerover", 1009, 540, 390, "pen", .5, 1));
+    inkCanvas.dispatchEvent(makePointer("pointermove", 1009, 560, 398, "pen", .5, 1));
+    inkCanvas.dispatchEvent(makePointer("pointerup", 1009, 560, 398, "pen", 0, 0));
     await wait(360);
      const teacherRelandWithoutDown = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 2 && teacherInkActivePointerId === null;
 
     resetTeacher();
-    pageStage.dispatchEvent(makePointer("pointerdown", 1009, 580, 410));
-    pageStage.dispatchEvent(makePointer("pointermove", 1009, 600, 418));
-    pageStage.dispatchEvent(makePointer("pointerout", 1009, 610, 420, "pen", 0, 0));
-    pageStage.dispatchEvent(makePointer("pointerover", 1009, 640, 440, "pen", .5, 1));
-    pageStage.dispatchEvent(makePointer("pointermove", 1009, 660, 448, "pen", .5, 1));
-    pageStage.dispatchEvent(makePointer("pointerup", 1009, 660, 448, "pen", 0, 0));
+    inkCanvas.dispatchEvent(makePointer("pointerdown", 1009, 580, 410));
+    inkCanvas.dispatchEvent(makePointer("pointermove", 1009, 600, 418));
+    inkCanvas.dispatchEvent(makePointer("pointerout", 1009, 610, 420, "pen", 0, 0));
+    inkCanvas.dispatchEvent(makePointer("pointerover", 1009, 640, 440, "pen", .5, 1));
+    inkCanvas.dispatchEvent(makePointer("pointermove", 1009, 660, 448, "pen", .5, 1));
+    inkCanvas.dispatchEvent(makePointer("pointerup", 1009, 660, 448, "pen", 0, 0));
     await wait(360);
      const teacherRelandSamePointer = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 2 && teacherInkActivePointerId === null;
 
     resetTeacher();
-    stroke(pageStage, 1006, 380, 380);
-    pageStage.dispatchEvent(makePointer("pointerdown", 1007, 390, 390, "touch"));
-    pageStage.dispatchEvent(makePointer("pointermove", 1007, 410, 398, "touch"));
-    pageStage.dispatchEvent(makePointer("pointerup", 1007, 410, 398, "touch"));
+    stroke(inkCanvas, 1006, 380, 380);
+    inkCanvas.dispatchEvent(makePointer("pointerdown", 1007, 390, 390, "touch"));
+    inkCanvas.dispatchEvent(makePointer("pointermove", 1007, 410, 398, "touch"));
+    inkCanvas.dispatchEvent(makePointer("pointerup", 1007, 410, 398, "touch"));
      const teacherFingerIgnored = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 1;
 
     const area = state.areas[0];
@@ -216,7 +221,8 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     await Promise.all([oldSave, newSave]);
      const saveRaceProtected = JSON.stringify(teacherInkForPage(Number(state.currentPage), teacherMaterialId) || []) === JSON.stringify([oldStroke, newStroke]);
     window.commitLocalMutation = originalCommitLocalMutation;
-    return JSON.stringify({ teacherSeparateStrokes, teacherShortCancel, teacherStaleRecovery, teacherRelandWithoutDown, teacherRelandSamePointer, teacherFingerIgnored, reviewSeparateStrokes, reviewRelandWithoutDown, reviewRelandSamePointer, reviewStylusGestureSafe, saveRaceProtected, teacherActivePointer: teacherInkActivePointerId, reviewActivePointer: reviewActivePointerId });
+    window.commitLocalMutation = realCommitLocalMutation;
+     return JSON.stringify({ teacherSeparateStrokes, teacherShortCancel, teacherStaleRecovery, teacherRelandWithoutDown, teacherRelandSamePointer, teacherFingerIgnored, reviewSeparateStrokes, reviewRelandWithoutDown, reviewRelandSamePointer, reviewStylusGestureSafe, saveRaceProtected, teacherActivePointer: teacherInkActivePointerId, reviewActivePointer: reviewActivePointerId });
   })()`);
 
   const checks = JSON.parse(result);
