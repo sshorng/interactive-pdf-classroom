@@ -237,6 +237,8 @@
     .ink-layer { position: absolute; inset: 0; z-index: 3; display: none; width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
     .page-stage .ink-layer.visible { display: block; }
     .ink-controls { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 4px; min-width: max-content; }
+    .ink-touch-mode-button { flex: 0 0 auto; min-height: 36px; padding: 6px 10px; color: var(--teal-dark); background: rgba(255,255,255,.72); border: 1px solid #d5d5cb; border-radius: 9px; font-size: 12px; font-weight: 800; white-space: nowrap; }
+    .ink-touch-mode-button.active { color: #fffaf4; background: var(--teal); border-color: var(--teal); }
     .ink-icon-button, .ink-swatch { display: inline-grid; flex: 0 0 auto; place-items: center; width: 36px; height: 36px; padding: 0; color: var(--teal-dark); background: rgba(255,255,255,.72); border: 1px solid #d5d5cb; border-radius: 9px; font-size: 18px; }
     .ink-icon-button:hover, .ink-icon-button.active { color: #fffaf4; background: var(--teal); border-color: var(--teal); }
     .ink-icon-button.danger:hover { color: #fffaf4; background: var(--danger); border-color: var(--danger); }
@@ -527,6 +529,7 @@
       .ink-controls select { min-height: 42px; }
       .ink-controls input[type="color"] { width: 42px; height: 42px; }
       .ink-controls input[type="range"] { width: 110px; height: 34px; }
+      .ink-touch-mode-button { min-height: 42px; }
     }
   </style>
 </head>
@@ -592,6 +595,7 @@
     const MAX_PDF_BYTES = 20 * 1024 * 1024;
     const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
     const CLASSROOM_POLL_INTERVAL = 1000;
+    const CLASSROOM_SYNC_MAX_IN_FLIGHT = 2;
     const CLASSROOM_SUBMISSIONS_POLL_INTERVAL = 6000;
     const INK_SAVE_DELAY = 180;
     const INK_WIDTH_STEPS = [2, 4, 6, 8];
@@ -632,6 +636,7 @@
       teacherInkVersions: new Map(),
       submissionCounts: new Map(),
       inkTool: "pen",
+      touchMode: localStorage.getItem(APP_KEY + "touch_mode") === "write" ? "write" : "scroll",
       previousInkTool: "pen",
       inkShape: "arrow",
       inkColor: "#c47f78",
@@ -655,6 +660,7 @@
       adminToken: localStorage.getItem(APP_KEY + "admin_token") || "",
       pollTimer: null,
       lastStudentSubmissionPollAt: 0,
+      lastReviewSubmissionPollAt: 0,
       lastClassroomCountsPollAt: 0,
       outboxRetryTimer: null,
       flushBusy: false,
@@ -1236,9 +1242,10 @@
       const indicator = document.getElementById("pullRefreshIndicator");
       if (!indicator) return;
       scroll.dataset.pullRefreshBound = "1";
-      bindPullToRefreshTarget(scroll, function (event) {
-        if (state.view !== "review" || scroll.scrollTop > 5) return false;
-        if (teacherInkActivePointerId !== null || reviewActivePointerId !== null) return false;
+       bindPullToRefreshTarget(scroll, function (event) {
+         if (state.view !== "review" || scroll.scrollTop > 5) return false;
+         if (state.touchMode === "write") return false;
+         if (teacherInkActivePointerId !== null || reviewActivePointerId !== null) return false;
         const target = event.target;
         if (target && target.closest && target.closest(".pdf-toolbar, .toolbar-button, .classroom-toolbar-title, .zone, textarea, input, select, button")) return false;
         return true;
@@ -2053,6 +2060,10 @@
       state.teacherInk.clear();
       teacherInkRevision.clear();
       teacherInkSaveChains.clear();
+      teacherTouchPointerIds.clear();
+      teacherTouchGesture = false;
+      reviewTouchPointerIds.clear();
+      reviewTouchGesture = false;
       teacherInkSaveTimers.forEach(function (timer) { window.clearTimeout(timer); });
       teacherInkSaveTimers.clear();
       teacherInkSaveModes.clear();
@@ -2060,6 +2071,7 @@
       state.submissionCounts.clear();
       state.classroomStateRevision = 0;
       state.lastStudentSubmissionPollAt = 0;
+      state.lastReviewSubmissionPollAt = 0;
       state.lastClassroomCountsPollAt = 0;
       state.currentPage = 1;
       state.zoom = 1;
@@ -2260,7 +2272,7 @@
         const heading = editorHead.querySelector("h2");
         const instruction = editorHead.querySelector("p:not(.eyebrow)");
           if (heading) heading.textContent = includeInk ? "課堂 PDF" : "設定問答區";
-          if (instruction) instruction.textContent = includeInk ? "觸控筆可直接書寫，手指可捲動與捏合縮放。" : "點擊 PDF 放置問答圖釘，系統會先套用預設標題。";
+          if (instruction) instruction.textContent = includeInk ? "觸控筆可直接書寫；手指模式可切換捲動或書寫。" : "點擊 PDF 放置問答圖釘，系統會先套用預設標題。";
       }
       const zoneLayer = document.getElementById("zoneLayer");
       if (!document.getElementById("inkCanvas")) {
@@ -2281,7 +2293,14 @@
         controls.id = "inkControls";
         controls.className = "ink-controls";
         controls.innerHTML = "<button class=\"ink-icon-button active\" data-ink-tool=\"pen\" type=\"button\" title=\"手寫筆\" aria-label=\"手寫筆\">✎</button><button class=\"ink-icon-button\" data-ink-tool=\"highlighter\" type=\"button\" title=\"螢光筆\" aria-label=\"螢光筆\">▰</button><button class=\"ink-icon-button\" data-ink-tool=\"shape\" type=\"button\" title=\"圖形\" aria-label=\"圖形\">◇</button><span class=\"ink-shape-buttons\" id=\"inkShapeButtons\" hidden><button class=\"ink-icon-button\" data-ink-shape=\"arrow\" type=\"button\" title=\"箭頭\" aria-label=\"箭頭\">➜</button><button class=\"ink-icon-button\" data-ink-shape=\"line\" type=\"button\" title=\"直線\" aria-label=\"直線\">╱</button><button class=\"ink-icon-button\" data-ink-shape=\"rect\" type=\"button\" title=\"矩形\" aria-label=\"矩形\">□</button><button class=\"ink-icon-button\" data-ink-shape=\"circle\" type=\"button\" title=\"圓形\" aria-label=\"圓形\">○</button></span><button class=\"ink-icon-button\" data-ink-tool=\"eraser\" type=\"button\" title=\"橡皮擦\" aria-label=\"橡皮擦\">⌫</button><span class=\"ink-palette\" aria-label=\"常用顏色\"><button class=\"ink-swatch active\" data-ink-color=\"#c47f78\" style=\"background:#c47f78\" type=\"button\" title=\"豆沙玫瑰\" aria-label=\"豆沙玫瑰\"></button><button class=\"ink-swatch\" data-ink-color=\"#9eaaa0\" style=\"background:#9eaaa0\" type=\"button\" title=\"鼠尾草綠\" aria-label=\"鼠尾草綠\"></button><button class=\"ink-swatch\" data-ink-color=\"#91a6b5\" style=\"background:#91a6b5\" type=\"button\" title=\"霧藍\" aria-label=\"霧藍\"></button><button class=\"ink-swatch\" data-ink-color=\"#a99db8\" style=\"background:#a99db8\" type=\"button\" title=\"灰紫\" aria-label=\"灰紫\"></button><button class=\"ink-swatch\" data-ink-color=\"#c1a477\" style=\"background:#c1a477\" type=\"button\" title=\"奶茶棕\" aria-label=\"奶茶棕\"></button></span><input id=\"inkColorField\" class=\"ink-custom-color\" type=\"color\" value=\"#c47f78\" title=\"自訂顏色\" aria-label=\"自訂顏色\"><span class=\"ink-width-selector\" id=\"inkWidthSelector\" aria-label=\"筆畫粗細\"><button class=\"ink-width-btn active\" data-ink-width=\"2\" type=\"button\" title=\"細 (2px)\" aria-label=\"細 2px\">2</button><button class=\"ink-width-btn\" data-ink-width=\"4\" type=\"button\" title=\"適中 (4px)\" aria-label=\"適中 4px\">4</button><button class=\"ink-width-btn\" data-ink-width=\"6\" type=\"button\" title=\"粗 (6px)\" aria-label=\"粗 6px\">6</button><button class=\"ink-width-btn\" data-ink-width=\"8\" type=\"button\" title=\"特粗 (8px)\" aria-label=\"特粗 8px\">8</button></span><button class=\"ink-icon-button\" id=\"undoTeacherInkButton\" type=\"button\" title=\"復原一筆\" aria-label=\"復原一筆\">↶</button><button class=\"ink-icon-button danger\" id=\"clearTeacherInkButton\" type=\"button\" title=\"清除本頁手寫\" aria-label=\"清除本頁手寫\">⌫</button><button class=\"ink-icon-button danger\" id=\"clearAllTeacherInkButton\" type=\"button\" title=\"全部清除\" aria-label=\"全部清除\">⊗</button>";
-        toolbar.appendChild(controls);
+         const touchModeButton = document.createElement("button");
+         touchModeButton.id = "inkTouchModeButton";
+         touchModeButton.className = "ink-touch-mode-button";
+         touchModeButton.dataset.touchMode = "1";
+         touchModeButton.type = "button";
+         touchModeButton.addEventListener("click", toggleTouchMode);
+         controls.appendChild(touchModeButton);
+         toolbar.appendChild(controls);
         bindInkControls();
       }
       updateInkControls();
@@ -2315,10 +2334,11 @@
         return Math.hypot(dx, dy);
       }
 
-      scroll.addEventListener("touchstart", function (event) {
-        if (touchEventHasStylus(event) || teacherInkActivePointerId !== null) return;
-        if (event.touches.length === 2) {
-          isPinching = true;
+        scroll.addEventListener("touchstart", function (event) {
+          if (touchEventHasStylus(event)) return;
+          if (event.touches.length === 2) {
+            if (teacherInkActivePointerId !== null) discardTeacherInkForTouchGesture();
+           isPinching = true;
           startTouch = null;
           lastTouch = null;
           initialPinchDistance = getPinchDist(event);
@@ -2329,16 +2349,22 @@
             stage.style.transformOrigin = "center top";
             stage.style.transition = "none";
           }
-        } else if (event.touches.length === 1 && !isPinching) {
-          const touch = event.touches[0];
+         } else if (event.touches.length === 1 && !isPinching) {
+           if (teacherInkActivePointerId !== null) return;
+           if (state.view === "review" && state.touchMode === "write") {
+             startTouch = null;
+             lastTouch = null;
+             return;
+           }
+           const touch = event.touches[0];
           startTouch = { x: touch.clientX, y: touch.clientY, time: performance.now() };
           lastTouch = { x: touch.clientX, y: touch.clientY };
         }
       }, { passive: false });
 
-      scroll.addEventListener("touchmove", function (event) {
-        if (touchEventHasStylus(event) || teacherInkActivePointerId !== null) return;
-        if (event.touches.length === 2 && isPinching && initialPinchDistance > 0) {
+        scroll.addEventListener("touchmove", function (event) {
+          if (touchEventHasStylus(event)) return;
+          if (event.touches.length === 2 && isPinching && initialPinchDistance > 0) {
           event.preventDefault();
           const currDist = getPinchDist(event);
           if (currDist > 0) {
@@ -2348,7 +2374,7 @@
               stage.style.transform = "scale(" + lastPinchScale + ")";
             }
           }
-        } else if (event.touches.length === 1 && startTouch && lastTouch) {
+         } else if (event.touches.length === 1 && startTouch && lastTouch && teacherInkActivePointerId === null && !(state.view === "review" && state.touchMode === "write")) {
           event.preventDefault();
           const touch = event.touches[0];
           scroll.scrollLeft += lastTouch.x - touch.clientX;
@@ -2357,9 +2383,14 @@
         }
       }, { passive: false });
 
-      scroll.addEventListener("touchend", function (event) {
-        if (touchEventHasStylus(event)) return;
-        if (isPinching) {
+       scroll.addEventListener("touchend", function (event) {
+         if (touchEventHasStylus(event)) return;
+         if (state.view === "review" && state.touchMode === "write" && !isPinching) {
+           startTouch = null;
+           lastTouch = null;
+           return;
+         }
+         if (isPinching) {
           if (event.touches.length < 2) {
             isPinching = false;
             const stage = scroll.querySelector(".page-stage");
@@ -2417,9 +2448,9 @@
       }, { passive: false });
     }
 
-    function bindInkControls() {
-      const controls = document.getElementById("inkControls");
-      const color = document.getElementById("inkColorField");
+     function bindInkControls() {
+       const controls = document.getElementById("inkControls");
+       const color = document.getElementById("inkColorField");
       if (!controls || controls.dataset.bound === "1") return;
       controls.dataset.bound = "1";
       controls.querySelectorAll("[data-ink-tool]").forEach(function (button) { button.addEventListener("click", function () { state.inkTool = button.dataset.inkTool; updateInkControls(); }); });
@@ -2430,11 +2461,31 @@
            state.inkWidth = Number(button.dataset.inkWidth) || 2;
           updateInkControls();
         });
-      });
-      if (color) color.addEventListener("input", function (event) { state.inkColor = event.target.value; });
-    }
+       });
+       if (color) color.addEventListener("input", function (event) { state.inkColor = event.target.value; });
+     }
 
-    function updateInkControls() {
+     function toggleTouchMode() {
+       if (teacherInkActivePointerId !== null) discardTeacherInkForTouchGesture();
+       if (reviewActivePointerId !== null) discardReviewInkForTouchGesture();
+       state.touchMode = state.touchMode === "write" ? "scroll" : "write";
+       localStorage.setItem(APP_KEY + "touch_mode", state.touchMode);
+       updateInkControls();
+       updateReviewInkControls();
+       showToast(state.touchMode === "write" ? "手指現在可直接書寫；雙指仍可捲動或縮放。" : "手指現在用於捲動與縮放；觸控筆仍可書寫。", "info");
+     }
+
+     function updateTouchModeButtons() {
+       const writing = state.touchMode === "write";
+       document.querySelectorAll("[data-touch-mode]").forEach(function (button) {
+         button.textContent = writing ? "手指：書寫" : "手指：捲動";
+         button.title = writing ? "切換為手指捲動與縮放" : "切換為手指書寫";
+         button.setAttribute("aria-label", button.title);
+         button.classList.toggle("active", writing);
+       });
+     }
+
+     function updateInkControls() {
       const color = document.getElementById("inkColorField");
        const shapeButtons = document.getElementById("inkShapeButtons");
       document.querySelectorAll("[data-ink-tool]").forEach(function (item) { item.classList.toggle("active", item.dataset.inkTool === state.inkTool); });
@@ -2443,11 +2494,12 @@
       document.querySelectorAll("[data-ink-width]").forEach(function (item) { item.classList.toggle("active", Number(item.dataset.inkWidth) === Number(state.inkWidth)); });
       if (color) color.value = state.inkColor;
       if (shapeButtons) shapeButtons.hidden = state.inkTool !== "shape";
-       const canvas = document.getElementById("inkCanvas");
-       if (canvas) {
-         canvas.style.touchAction = "none";
-       }
-     }
+        const canvas = document.getElementById("inkCanvas");
+        if (canvas) {
+          canvas.style.touchAction = "none";
+        }
+        updateTouchModeButtons();
+      }
 
      function setInkStatus(message) {
       const status = document.getElementById("inkStatus");
@@ -2633,8 +2685,13 @@
        Object.keys(counts || {}).forEach(function (areaId) { state.submissionCounts.set(String(areaId), Number(counts[areaId]) || 0); });
      }
 
+    let classroomSyncInFlight = 0;
+    let classroomSyncRequestSequence = 0;
+    let classroomSyncAppliedSequence = 0;
+
     async function loadClassroomSync() {
       if (!state.boardId) return;
+      const requestSequence = ++classroomSyncRequestSequence;
       const viewAtStart = state.view;
       const requestedMaterialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
       const localInk = new Map();
@@ -2660,7 +2717,10 @@
         }
       }
       if (viewAtStart !== state.view || String(state.boardId) !== String(syncPayload.boardId) || String(state.activeMaterialId || legacyMaterialId(state.boardId)) !== requestedMaterialId) return;
+      if (requestSequence < classroomSyncAppliedSequence) return;
       const hasPendingCatalogMutation = await hasPendingBoardMutation(state.boardId);
+      if (requestSequence < classroomSyncAppliedSequence) return;
+      classroomSyncAppliedSequence = requestSequence;
       const previousActiveMaterial = activeMaterial();
       let activeMaterialMissing = false;
       let activeMaterialPdfChanged = false;
@@ -2787,23 +2847,44 @@
       }
     }
 
-    let classroomPollBusy = false;
+    let classroomSubmissionPollBusy = false;
+
+    function startClassroomSyncPoll() {
+      if (classroomSyncInFlight >= CLASSROOM_SYNC_MAX_IN_FLIGHT) return null;
+      classroomSyncInFlight += 1;
+      return Promise.resolve().then(function () { return loadClassroomSync(); }).catch(function () {}).finally(function () {
+        classroomSyncInFlight -= 1;
+      });
+    }
+
+    function startClassroomSubmissionPoll(callback) {
+      if (classroomSubmissionPollBusy) return null;
+      classroomSubmissionPollBusy = true;
+      return Promise.resolve().then(callback).catch(function () {}).finally(function () {
+        classroomSubmissionPollBusy = false;
+      });
+    }
+
     async function pollClassroomView() {
-      if (classroomPollBusy) return;
-      classroomPollBusy = true;
-      try {
-        if (state.view === "review") await Promise.all([loadClassroomSync(), loadReviewSubmissions()]);
-        else if (state.view === "student") {
-          const tasks = [loadClassroomSync()];
-          if (Date.now() - state.lastStudentSubmissionPollAt >= CLASSROOM_SUBMISSIONS_POLL_INTERVAL) {
-            state.lastStudentSubmissionPollAt = Date.now();
-            tasks.push(loadStudentSubmissions());
-          }
-          await Promise.all(tasks);
-        }
-      } finally {
-        classroomPollBusy = false;
+      const tasks = [];
+      if (state.view === "review" || state.view === "student") {
+        const syncTask = startClassroomSyncPoll();
+        if (syncTask) tasks.push(syncTask);
       }
+      if (state.view === "review" && Date.now() - state.lastReviewSubmissionPollAt >= CLASSROOM_SUBMISSIONS_POLL_INTERVAL) {
+        const submissionTask = startClassroomSubmissionPoll(function () { return loadReviewSubmissions(true); });
+        if (submissionTask) {
+          state.lastReviewSubmissionPollAt = Date.now();
+          tasks.push(submissionTask);
+        }
+      } else if (state.view === "student" && Date.now() - state.lastStudentSubmissionPollAt >= CLASSROOM_SUBMISSIONS_POLL_INTERVAL) {
+        const submissionTask = startClassroomSubmissionPoll(loadStudentSubmissions);
+        if (submissionTask) {
+          state.lastStudentSubmissionPollAt = Date.now();
+          tasks.push(submissionTask);
+        }
+      }
+      await Promise.all(tasks);
     }
 
     function startClassroomPolling() {
@@ -3031,6 +3112,8 @@
     const teacherInkSaveChains = new Map();
     const teacherInkSaveTimers = new Map();
     const teacherInkSaveModes = new Map();
+    const teacherTouchPointerIds = new Set();
+    let teacherTouchGesture = false;
 
     function isStylusTouch(touch) {
       const type = String(touch && touch.touchType || "").toLowerCase();
@@ -3099,17 +3182,46 @@
     }
 
     function inkPointerIsContact(event) {
-      if (!event || event.pointerType === "touch") return false;
+      if (!event) return false;
+      if (event.pointerType === "touch") return state.touchMode === "write" && event.type !== "pointerover" && event.type !== "pointerout";
       const buttons = Number(event.buttons);
       if (event.pointerType === "pen") return (Number.isFinite(buttons) && buttons > 0) || (Number(event.pressure) > 0);
       if (event.pointerType === "mouse") return Number.isFinite(buttons) && buttons > 0;
       return false;
     }
 
+    function trackTeacherTouchPointer(event, active) {
+      if (!event || event.pointerType !== "touch" || event.pointerId === undefined) return;
+      const id = String(event.pointerId);
+      if (active) teacherTouchPointerIds.add(id);
+      else teacherTouchPointerIds.delete(id);
+      if (!teacherTouchPointerIds.size) teacherTouchGesture = false;
+    }
+
+    function discardTeacherInkForTouchGesture() {
+      const canvas = document.getElementById("inkCanvas");
+      const pointerId = teacherInkActivePointerId;
+      releaseInkPointerCapture(canvas, pointerId);
+      teacherInkActivePointerId = null;
+      teacherInkContactActive = false;
+      teacherInkActiveStroke = null;
+      teacherInkErasing = false;
+      teacherInkChanged = false;
+      if (teacherInkPreviewFrame !== null) {
+        cancelAnimationFrame(teacherInkPreviewFrame);
+        teacherInkPreviewFrame = null;
+      }
+      renderTeacherInk();
+    }
+
     function beginTeacherInkTouch(event) {
       let stylus = null;
       for (let index = 0; event.changedTouches && index < event.changedTouches.length; index += 1) {
         if (isStylusTouch(event.changedTouches[index])) { stylus = event.changedTouches[index]; break; }
+      }
+      if (!stylus) {
+        if (state.touchMode !== "write" || window.PointerEvent || !event.touches || event.touches.length !== 1) return;
+        stylus = event.changedTouches && event.changedTouches[0];
       }
       if (!stylus) return;
       if (teacherInkActivePointerId !== null) {
@@ -3158,8 +3270,17 @@
 
     function beginTeacherInk(event) {
       if (!state.pdf) return;
-      if (event.pointerType === "touch") return;
-      if (event.pointerType !== "pen" && event.pointerType !== "mouse") return;
+      if (event.pointerType === "touch") {
+        trackTeacherTouchPointer(event, true);
+        if (state.touchMode !== "write") return;
+        if (teacherTouchPointerIds.size > 1 || event.isPrimary === false) {
+          teacherTouchGesture = true;
+          if (teacherInkActivePointerId !== null) discardTeacherInkForTouchGesture();
+          return;
+        }
+        if (teacherTouchGesture) return;
+      }
+      if (event.pointerType !== "pen" && event.pointerType !== "mouse" && event.pointerType !== "touch") return;
       if (teacherInkActivePointerId !== null) {
         if (typeof teacherInkActivePointerId === "string") return;
         finishTeacherInk(null, true);
@@ -3259,14 +3380,14 @@
     }
 
     function moveTeacherInk(event) {
-      if (!event || event.pointerType === "touch") return;
+      if (!event || (event.pointerType === "touch" && (state.touchMode !== "write" || teacherTouchGesture))) return;
       const matchesActivePointer = event.pointerId === undefined || String(event.pointerId) === String(teacherInkActivePointerId);
       const contact = inkPointerIsContact(event);
       if (!contact) {
         if (event.type !== "pointerover" && teacherInkActivePointerId !== null && matchesActivePointer) teacherInkContactActive = false;
         return;
       }
-      if (event.pointerType !== "pen" && event.pointerType !== "mouse") return;
+       if (event.pointerType !== "pen" && event.pointerType !== "mouse" && event.pointerType !== "touch") return;
       if (teacherInkActivePointerId === null || !matchesActivePointer || !teacherInkContactActive) {
         if (teacherInkActivePointerId !== null) finishTeacherInk(null, true);
         beginTeacherInk(event);
@@ -3293,6 +3414,9 @@
      }
 
     function finishTeacherInk(event, cancelled) {
+      const touchGesture = Boolean(event && event.pointerType === "touch" && teacherTouchGesture);
+      if (event && event.pointerType === "touch") trackTeacherTouchPointer(event, false);
+      if (touchGesture || (event && event.pointerType === "touch" && teacherTouchGesture)) return;
       if (event && event.pointerId !== undefined && String(event.pointerId) !== String(teacherInkActivePointerId)) return;
       const pointerId = teacherInkActivePointerId;
       const canvas = document.getElementById("inkCanvas") || (event && event.currentTarget);
@@ -3328,6 +3452,9 @@
     }
 
     function cancelTeacherInk(event) {
+      const touchGesture = Boolean(event && event.pointerType === "touch" && teacherTouchGesture);
+      if (event && event.pointerType === "touch") trackTeacherTouchPointer(event, false);
+      if (touchGesture || (event && event.pointerType === "touch" && teacherTouchGesture)) return;
       if (event && event.pointerId !== undefined && String(event.pointerId) !== String(teacherInkActivePointerId)) return;
       if (teacherInkActiveStroke && teacherInkActiveStroke.points && teacherInkActiveStroke.points.length > 0) {
         finishTeacherInk(event, true);
@@ -4630,8 +4757,9 @@
       return rows;
     }
 
-    async function loadReviewSubmissions(skipLocal) {
-      state.reviewLoading = true;
+     async function loadReviewSubmissions(skipLocal) {
+       state.lastReviewSubmissionPollAt = Date.now();
+       state.reviewLoading = true;
       let localRows = state.submissions;
       if (!skipLocal) localRows = await loadLocalReviewSubmissions();
       try {
@@ -4771,7 +4899,14 @@
         controls.id = "reviewInkControls";
         controls.className = "ink-controls review-ink-controls";
         controls.innerHTML = "<button class=\"ink-icon-button active\" data-review-tool=\"pen\" type=\"button\" title=\"手寫筆\" aria-label=\"手寫筆\">✎</button><button class=\"ink-icon-button\" id=\"reviewToolPen\" data-review-tool=\"pen\" type=\"button\" style=\"display:none\"></button><button class=\"ink-icon-button\" data-review-tool=\"highlighter\" type=\"button\" title=\"螢光筆\" aria-label=\"螢光筆\">▰</button><button class=\"ink-icon-button\" data-review-tool=\"shape\" type=\"button\" title=\"圖形\" aria-label=\"圖形\">◇</button><span class=\"ink-shape-buttons\" id=\"reviewShapeButtons\" hidden><button class=\"ink-icon-button\" data-review-shape=\"arrow\" type=\"button\" title=\"箭頭\" aria-label=\"箭頭\">➜</button><button class=\"ink-icon-button\" data-review-shape=\"line\" type=\"button\" title=\"直線\" aria-label=\"直線\">╱</button><button class=\"ink-icon-button\" data-review-shape=\"rect\" type=\"button\" title=\"矩形\" aria-label=\"矩形\">□</button><button class=\"ink-icon-button\" data-review-shape=\"circle\" type=\"button\" title=\"圓形\" aria-label=\"圓形\">○</button></span><button class=\"ink-icon-button\" data-review-tool=\"eraser\" type=\"button\" title=\"橡皮擦\" aria-label=\"橡皮擦\">⌫</button><span class=\"ink-palette\" aria-label=\"常用顏色\"><button class=\"ink-swatch active\" data-review-color=\"#c47f78\" style=\"background:#c47f78\" type=\"button\" title=\"豆沙玫瑰\" aria-label=\"豆沙玫瑰\"></button><button class=\"ink-swatch\" data-review-color=\"#9eaaa0\" style=\"background:#9eaaa0\" type=\"button\" title=\"鼠尾草綠\" aria-label=\"鼠尾草綠\"></button><button class=\"ink-swatch\" data-review-color=\"#91a6b5\" style=\"background:#91a6b5\" type=\"button\" title=\"霧藍\" aria-label=\"霧藍\"></button><button class=\"ink-swatch\" data-review-color=\"#a99db8\" style=\"background:#a99db8\" type=\"button\" title=\"灰紫\" aria-label=\"灰紫\"></button><button class=\"ink-swatch\" data-review-color=\"#c1a477\" style=\"background:#c1a477\" type=\"button\" title=\"奶茶棕\" aria-label=\"奶茶棕\"></button></span>";
-        toolbar.insertBefore(controls, toolbar.firstChild);
+         const touchModeButton = document.createElement("button");
+         touchModeButton.id = "reviewTouchModeButton";
+         touchModeButton.className = "ink-touch-mode-button";
+         touchModeButton.dataset.touchMode = "1";
+         touchModeButton.type = "button";
+         touchModeButton.addEventListener("click", toggleTouchMode);
+         controls.appendChild(touchModeButton);
+         toolbar.insertBefore(controls, toolbar.firstChild);
         controls.querySelectorAll("[data-review-tool]").forEach(function (btn) {
           if (btn.id === "reviewToolPen") return;
           btn.addEventListener("click", function () {
@@ -4808,11 +4943,12 @@
       document.querySelectorAll("[data-review-color]").forEach(function (item) {
         item.classList.toggle("active", item.dataset.reviewColor && item.dataset.reviewColor.toLowerCase() === state.reviewColor.toLowerCase());
       });
-      const shapeButtons = document.getElementById("reviewShapeButtons");
-      if (shapeButtons) shapeButtons.hidden = state.reviewTool !== "shape";
-      const colorField = document.getElementById("reviewColorField");
-      if (colorField) colorField.value = state.reviewColor;
-    }
+       const shapeButtons = document.getElementById("reviewShapeButtons");
+       if (shapeButtons) shapeButtons.hidden = state.reviewTool !== "shape";
+       const colorField = document.getElementById("reviewColorField");
+       if (colorField) colorField.value = state.reviewColor;
+       updateTouchModeButtons();
+     }
 
     async function loadReviewImages() {
       const submission = state.reviewSubmission;
@@ -4867,32 +5003,32 @@
         return Math.hypot(dx, dy);
       }
 
-      stage.addEventListener("touchstart", function (event) {
-        if (touchEventHasStylus(event)) return;
-        if (reviewActivePointerId !== null) return;
-        if (event.touches.length === 2) {
-          isReviewPinching = true;
-          lastTouch = null;
-          cancelReviewStroke();
-          initialPinchDistance = getPinchDist(event);
+       stage.addEventListener("touchstart", function (event) {
+         if (touchEventHasStylus(event)) return;
+         if (event.touches.length === 2) {
+           isReviewPinching = true;
+           lastTouch = null;
+           cancelReviewStroke();
+           initialPinchDistance = getPinchDist(event);
           initialZoom = state.reviewZoom || 1;
           lastPinchScale = 1;
           const wrap = stage.querySelector(".review-image-wrap");
           if (wrap) {
             wrap.style.transformOrigin = "center top";
-            wrap.style.transition = "none";
-          }
-        } else if (event.touches.length === 1 && !event.target.closest("textarea, input, select, button")) {
-          const touch = event.touches[0];
+             wrap.style.transition = "none";
+           }
+           return;
+         } else if (event.touches.length === 1 && !event.target.closest("textarea, input, select, button")) {
+           if (reviewActivePointerId !== null || state.touchMode === "write") return;
+           const touch = event.touches[0];
           lastTouch = { x: touch.clientX, y: touch.clientY };
           singleTouchMoved = false;
         }
       }, { passive: false });
 
-      stage.addEventListener("touchmove", function (event) {
-        if (touchEventHasStylus(event)) return;
-        if (reviewActivePointerId !== null) return;
-        if (event.touches.length === 2 && isReviewPinching && initialPinchDistance > 0) {
+       stage.addEventListener("touchmove", function (event) {
+         if (touchEventHasStylus(event)) return;
+         if (event.touches.length === 2 && isReviewPinching && initialPinchDistance > 0) {
           event.preventDefault();
           const currDist = getPinchDist(event);
           if (currDist > 0) {
@@ -4903,7 +5039,7 @@
               wrap.style.transform = "scale(" + (targetZoom / (state.reviewZoom || 1)) + ")";
             }
           }
-        } else if (event.touches.length === 1 && lastTouch) {
+         } else if (event.touches.length === 1 && lastTouch && reviewActivePointerId === null && state.touchMode !== "write") {
           event.preventDefault();
           const touch = event.touches[0];
           const dx = lastTouch.x - touch.clientX;
@@ -4915,10 +5051,9 @@
         }
       }, { passive: false });
 
-      stage.addEventListener("touchend", function (event) {
-        if (touchEventHasStylus(event)) return;
-        if (reviewActivePointerId !== null) return;
-        if (isReviewPinching) {
+       stage.addEventListener("touchend", function (event) {
+         if (touchEventHasStylus(event)) return;
+          if (isReviewPinching) {
           if (event.touches.length < 2) {
             isReviewPinching = false;
             const wrap = stage.querySelector(".review-image-wrap");
@@ -4932,10 +5067,11 @@
             initialPinchDistance = 0;
             lastPinchScale = 1;
           }
-          lastTouch = null;
-          return;
-        }
-        const wasMoved = singleTouchMoved;
+           lastTouch = null;
+           return;
+         }
+         if (reviewActivePointerId !== null || state.touchMode === "write") return;
+         const wasMoved = singleTouchMoved;
         lastTouch = null;
         singleTouchMoved = false;
         if (!wasMoved && event.changedTouches.length === 1 && !event.target.closest("textarea, input, select, button")) {
@@ -5047,12 +5183,47 @@
     let isReviewPinching = false;
     let reviewInkPreviewFrame = null;
     let reviewInkRenderedPointCount = 0;
+    const reviewTouchPointerIds = new Set();
+    let reviewTouchGesture = false;
+
+    function trackReviewTouchPointer(event, active) {
+      if (!event || event.pointerType !== "touch" || event.pointerId === undefined) return;
+      const id = String(event.pointerId);
+      if (active) reviewTouchPointerIds.add(id);
+      else reviewTouchPointerIds.delete(id);
+      if (!reviewTouchPointerIds.size) reviewTouchGesture = false;
+    }
+
+    function discardReviewInkForTouchGesture() {
+      const canvas = document.getElementById("reviewCanvas");
+      const pointerId = reviewActivePointerId;
+      releaseInkPointerCapture(canvas, pointerId);
+      reviewActivePointerId = null;
+      reviewInkContactActive = false;
+      reviewActiveStroke = null;
+      reviewErasing = false;
+      reviewInkChanged = false;
+      if (reviewInkPreviewFrame !== null) {
+        cancelAnimationFrame(reviewInkPreviewFrame);
+        reviewInkPreviewFrame = null;
+      }
+      drawReviewCanvas();
+    }
 
     function beginReviewInk(event) {
       const canvas = document.getElementById("reviewCanvas") || event.currentTarget;
       if (!canvas || isReviewPinching) return;
-      if (event.pointerType === "touch") return;
-      if (event.pointerType !== "pen" && event.pointerType !== "mouse") return;
+      if (event.pointerType === "touch") {
+        trackReviewTouchPointer(event, true);
+        if (state.touchMode !== "write") return;
+        if (reviewTouchPointerIds.size > 1 || event.isPrimary === false) {
+          reviewTouchGesture = true;
+          if (reviewActivePointerId !== null) discardReviewInkForTouchGesture();
+          return;
+        }
+        if (reviewTouchGesture) return;
+      }
+      if (event.pointerType !== "pen" && event.pointerType !== "mouse" && event.pointerType !== "touch") return;
       if (reviewActivePointerId !== null) {
         if (typeof reviewActivePointerId === "string") return;
         finishReviewStroke(null, true);
@@ -5080,7 +5251,7 @@
     }
 
     function moveReviewInk(event) {
-      if (!event || event.pointerType === "touch") return;
+      if (!event || (event.pointerType === "touch" && (state.touchMode !== "write" || reviewTouchGesture))) return;
       const canvas = document.getElementById("reviewCanvas") || event.currentTarget;
       const matchesActivePointer = event.pointerId === undefined || String(event.pointerId) === String(reviewActivePointerId);
       const contact = inkPointerIsContact(event);
@@ -5088,7 +5259,7 @@
         if (event.type !== "pointerover" && reviewActivePointerId !== null && matchesActivePointer) reviewInkContactActive = false;
         return;
       }
-      if (event.pointerType !== "pen" && event.pointerType !== "mouse") return;
+       if (event.pointerType !== "pen" && event.pointerType !== "mouse" && event.pointerType !== "touch") return;
       if (reviewActivePointerId === null || !matchesActivePointer || !reviewInkContactActive) {
         if (reviewActivePointerId !== null) finishReviewStroke(null, true);
         beginReviewInk(event);
@@ -5119,7 +5290,11 @@
       for (let index = 0; event.changedTouches && index < event.changedTouches.length; index += 1) {
         if (isStylusTouch(event.changedTouches[index])) { stylus = event.changedTouches[index]; break; }
       }
-      if (!stylus) return;
+       if (!stylus) {
+         if (state.touchMode !== "write" || window.PointerEvent || !event.touches || event.touches.length !== 1) return;
+         stylus = event.changedTouches && event.changedTouches[0];
+       }
+       if (!stylus) return;
       if (reviewActivePointerId !== null) {
         if (typeof reviewActivePointerId !== "string") return;
         finishReviewStroke(null, true);
@@ -5166,6 +5341,9 @@
     }
 
     function finishReviewStroke(event, cancelled) {
+      const touchGesture = Boolean(event && event.pointerType === "touch" && reviewTouchGesture);
+      if (event && event.pointerType === "touch") trackReviewTouchPointer(event, false);
+      if (touchGesture || (event && event.pointerType === "touch" && reviewTouchGesture)) return;
       if (event && event.pointerId !== undefined && String(event.pointerId) !== String(reviewActivePointerId)) return;
       const pointerId = reviewActivePointerId;
       const canvas = document.getElementById("reviewCanvas") || (event && event.currentTarget);
@@ -5195,6 +5373,9 @@
     }
 
     function cancelReviewStroke(event) {
+      const touchGesture = Boolean(event && event.pointerType === "touch" && reviewTouchGesture);
+      if (event && event.pointerType === "touch") trackReviewTouchPointer(event, false);
+      if (touchGesture || (event && event.pointerType === "touch" && reviewTouchGesture)) return;
       if (event && event.pointerId !== undefined && String(event.pointerId) !== String(reviewActivePointerId)) return;
       if (reviewActiveStroke && reviewActiveStroke.points && reviewActiveStroke.points.length > 0) {
         finishReviewStroke(event, true);

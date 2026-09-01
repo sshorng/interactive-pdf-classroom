@@ -130,6 +130,16 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     inkCanvas.dispatchEvent(makePointer("pointerup", 1007, 410, 398, "touch"));
      const teacherFingerIgnored = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 1;
 
+    state.touchMode = "write";
+    updateInkControls();
+    resetTeacher();
+    inkCanvas.dispatchEvent(makePointer("pointerdown", 1010, 420, 400, "touch"));
+    inkCanvas.dispatchEvent(makePointer("pointermove", 1010, 440, 408, "touch"));
+    inkCanvas.dispatchEvent(makePointer("pointerup", 1010, 440, 408, "touch"));
+    const teacherFingerWriting = teacherInkForPage(state.currentPage, state.activeMaterialId).length === 1;
+    state.touchMode = "scroll";
+    updateInkControls();
+
     const area = state.areas[0];
     const svgBase64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAwIiBoZWlnaHQ9IjYwMCI+PHJlY3Qgd2lkdGg9IjEwMDAiIGhlaWdodD0iNjAwIiBmaWxsPSJ3aGl0ZSIvPjwvc3ZnPg==";
     await localPut("files", { id: "L-ink-lifecycle-canvas", mime: "image/svg+xml", base64: svgBase64 });
@@ -191,6 +201,15 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     stylusStroke(1103, 240, 220);
     stylusStroke(1104, 245, 223);
     const reviewStylusGestureSafe = state.reviewZoom === reviewZoomBeforeTouch && state.reviewStrokes.length === reviewBeforeTouchStrokes + 2;
+    state.touchMode = "write";
+    updateReviewInkControls();
+    const reviewBeforeFingerWriting = state.reviewStrokes.length;
+    reviewImage.dispatchEvent(makePointer("pointerdown", 1110, 260, 240, "touch"));
+    reviewImage.dispatchEvent(makePointer("pointermove", 1110, 280, 248, "touch"));
+    reviewImage.dispatchEvent(makePointer("pointerup", 1110, 280, 248, "touch"));
+    const reviewFingerWriting = state.reviewStrokes.length === reviewBeforeFingerWriting + 1;
+    state.touchMode = "scroll";
+    updateReviewInkControls();
 
     await wait(500);
     window.clearTimeout(state.inkSaveTimer);
@@ -222,7 +241,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
      const saveRaceProtected = JSON.stringify(teacherInkForPage(Number(state.currentPage), teacherMaterialId) || []) === JSON.stringify([oldStroke, newStroke]);
     window.commitLocalMutation = originalCommitLocalMutation;
     window.commitLocalMutation = realCommitLocalMutation;
-     return JSON.stringify({ teacherSeparateStrokes, teacherShortCancel, teacherStaleRecovery, teacherRelandWithoutDown, teacherRelandSamePointer, teacherFingerIgnored, reviewSeparateStrokes, reviewRelandWithoutDown, reviewRelandSamePointer, reviewStylusGestureSafe, saveRaceProtected, teacherActivePointer: teacherInkActivePointerId, reviewActivePointer: reviewActivePointerId });
+      return JSON.stringify({ teacherSeparateStrokes, teacherShortCancel, teacherStaleRecovery, teacherRelandWithoutDown, teacherRelandSamePointer, teacherFingerIgnored, teacherFingerWriting, reviewSeparateStrokes, reviewRelandWithoutDown, reviewRelandSamePointer, reviewStylusGestureSafe, reviewFingerWriting, saveRaceProtected, teacherActivePointer: teacherInkActivePointerId, reviewActivePointer: reviewActivePointerId });
   })()`);
 
   const checks = JSON.parse(result);

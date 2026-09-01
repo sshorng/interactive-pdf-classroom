@@ -184,11 +184,23 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
     const teacherPollingSync = syncCalls - pollingBefore.sync === 1;
     const teacherPollingSubmissions = submissionCalls - pollingBefore.submissions === 1;
 
+    const pendingSyncResolvers = [];
+    window.loadClassroomSync = function () {
+      syncCalls += 1;
+      return new Promise((resolve) => pendingSyncResolvers.push(resolve));
+    };
+    const firstSlowPoll = window.pollClassroomView();
+    const secondSlowPoll = window.pollClassroomView();
+    await wait(40);
+    const overlappingSync = pendingSyncResolvers.length === 2;
+    pendingSyncResolvers.forEach((resolve) => resolve());
+    await Promise.all([firstSlowPoll, secondSlowPoll]);
+
     window.loadClassroomSync = originalSync;
     window.loadReviewSubmissions = originalReviewSubmissions;
     if (originalClassroomSubmissions) window.loadClassroomSubmissions = originalClassroomSubmissions;
     else delete window.loadClassroomSubmissions;
-    return JSON.stringify({ hasBinding, hasRefresh, hasClassroomPolling, topPullTriggeredOnce, nonTopPullIgnored, stylusPullIgnored, activeStylusPullIgnored, localInkPreserved, successIndicatorReset, failureIndicatorReset, teacherPollingSync, teacherPollingSubmissions });
+    return JSON.stringify({ hasBinding, hasRefresh, hasClassroomPolling, topPullTriggeredOnce, nonTopPullIgnored, stylusPullIgnored, activeStylusPullIgnored, localInkPreserved, successIndicatorReset, failureIndicatorReset, teacherPollingSync, teacherPollingSubmissions, overlappingSync });
   })()`);
 
   const checks = JSON.parse(result);
