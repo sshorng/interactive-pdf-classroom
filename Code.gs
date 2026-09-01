@@ -26,6 +26,11 @@ const TABLES = {
     headers: ["問答區ID", "版面ID", "教材ID", "頁碼", "左座標", "上座標", "寬度", "高度", "區域標題", "題目指示", "排序", "狀態", "建立時間", "修改時間"],
     keys: ["id", "boardId", "materialId", "page", "x", "y", "width", "height", "title", "prompt", "order", "status", "createdAt", "updatedAt"]
   },
+  answerMasks: {
+    name: "答案遮罩",
+    headers: ["遮罩ID", "版面ID", "教材ID", "頁碼", "左座標", "上座標", "寬度", "高度", "遮罩標籤", "排序", "狀態", "建立時間", "修改時間"],
+    keys: ["id", "boardId", "materialId", "page", "x", "y", "width", "height", "title", "order", "status", "createdAt", "updatedAt"]
+  },
   ink: {
     name: "教師手寫",
     headers: ["筆跡ID", "版面ID", "教材ID", "頁碼", "筆跡資料", "修改時間"],
@@ -613,7 +618,20 @@ function areasForBoard_(boardId, board) {
     .sort(compareAreasByPosition_);
 }
 
+function answerMasksForBoard_(boardId, board) {
+  const targetBoard = board || getBoard_(boardId, false);
+  const legacyId = legacyMaterialId_(targetBoard.id);
+  return readTable_("answerMasks")
+    .filter(function (item) { return String(item.boardId) === String(targetBoard.id) && String(item.status || "啟用") === "啟用"; })
+    .map(function (item) { return Object.assign({}, item, { materialId: String(item.materialId || legacyId) }); })
+    .sort(compareAnswerMasksByPosition_);
+}
+
 function compareAreasByPosition_(a, b) {
+  return (Number(a.page) || 1) - (Number(b.page) || 1) || (Number(a.y) || 0) - (Number(b.y) || 0) || (Number(a.x) || 0) - (Number(b.x) || 0) || (Number(a.order) || 0) - (Number(b.order) || 0) || String(a.id || "").localeCompare(String(b.id || ""));
+}
+
+function compareAnswerMasksByPosition_(a, b) {
   return (Number(a.page) || 1) - (Number(b.page) || 1) || (Number(a.y) || 0) - (Number(b.y) || 0) || (Number(a.x) || 0) - (Number(b.x) || 0) || (Number(a.order) || 0) - (Number(b.order) || 0) || String(a.id || "").localeCompare(String(b.id || ""));
 }
 
@@ -674,7 +692,8 @@ function publicBoard_(board) {
     status: board.status,
     createdAt: board.createdAt,
     updatedAt: board.updatedAt,
-    materials: materialsForBoard_(board.id, board)
+    materials: materialsForBoard_(board.id, board),
+    answerMasks: answerMasksForBoard_(board.id, board)
   };
 }
 
@@ -696,13 +715,17 @@ function inkVersion_(rows) {
 function classroomCatalogVersion_(board, materials, areas) {
   const targetMaterials = materials || materialsForBoard_(board.id, board);
   const targetAreas = areas || areasForBoard_(board.id, board);
+  const targetAnswerMasks = answerMasksForBoard_(board.id, board);
   const materialVersion = targetMaterials.map(function (item) {
     return String(item.id || "") + ":" + String(item.updatedAt || "") + ":" + String(item.pdfFileId || "");
   }).join(",");
   const areaVersion = targetAreas.map(function (item) {
     return String(item.id || "") + ":" + String(item.updatedAt || "");
   }).join(",");
-  const raw = [String(board.updatedAt || ""), materialVersion, areaVersion].join("|");
+  const answerMaskVersion = targetAnswerMasks.map(function (item) {
+    return String(item.id || "") + ":" + String(item.updatedAt || "");
+  }).join(",");
+  const raw = [String(board.updatedAt || ""), materialVersion, areaVersion, answerMaskVersion].join("|");
   return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw));
 }
 
@@ -851,7 +874,7 @@ function listBoards_(payload) {
 
 function getBoardData_(payload) {
   const board = getBoard_(payload.boardId, false);
-  return { ok: true, board: publicBoard_(board), materials: materialsForBoard_(board.id, board), areas: areasForBoard_(board.id, board), serverTime: now_() };
+  return { ok: true, board: publicBoard_(board), materials: materialsForBoard_(board.id, board), areas: areasForBoard_(board.id, board), answerMasks: answerMasksForBoard_(board.id, board), serverTime: now_() };
 }
 
 function listInk_(payload) {
@@ -912,6 +935,41 @@ function publicClassroomState_(item, boardId) {
   };
 }
 
+function cleanAnswerMasks_(board, masks) {
+  const materialIds = new Set(materialsForBoard_(board.id, board).map(function (item) { return String(item.id); }));
+  return parseArray_(masks).slice(0, 200).map(function (mask, index) {
+    const materialId = materialIdForItem_(board, mask && mask.materialId);
+    if (!materialIds.has(materialId)) throw new Error("答案遮罩所屬教材不存在。");
+    const width = Math.max(0.01, Math.min(1, Number(mask && mask.width) || 0.2));
+    const height = Math.max(0.01, Math.min(1, Number(mask && mask.height) || 0.12));
+    const x = Math.max(0, Math.min(1 - width, Number(mask && mask.x) || 0));
+    const y = Math.max(0, Math.min(1 - height, Number(mask && mask.y) || 0));
+    return {
+      id: cleanText_(mask && mask.id, 100) || makeId_("AM"),
+      boardId: board.id,
+      materialId: materialId,
+      page: Math.max(1, Number(mask && mask.page) || 1),
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      title: cleanText_(mask && mask.title || "答案遮罩 " + (index + 1), MAX_TEXT.title),
+      order: index + 1,
+      status: "啟用",
+      createdAt: cleanText_(mask && mask.createdAt, 40) || now_(),
+      updatedAt: now_()
+    };
+  }).sort(compareAnswerMasksByPosition_);
+}
+
+function saveAnswerMasks_(boardId, masks) {
+  const board = getBoard_(boardId, true);
+  deleteRows_("answerMasks", function (item) { return String(item.boardId) === String(board.id); });
+  cleanAnswerMasks_(board, masks).forEach(function (mask) { appendRow_("answerMasks", mask); });
+  touchClassroomPulseCatalog_(board);
+  return answerMasksForBoard_(board.id, board);
+}
+
 function touchClassroomPulseState_(item, boardId) {
   const state = publicClassroomState_(item, boardId);
   cacheClassroomPulseState_(state);
@@ -959,6 +1017,7 @@ function classroomSync_(payload) {
     return String(clientInkVersions[String(item.id)] || "") !== String(item.updatedAt || "");
   }) : [];
   const areas = areasForBoard_(board.id, board);
+  const answerMasks = answerMasksForBoard_(board.id, board);
   const includeSubmissionCounts = String(payload.includeSubmissionCounts || "1") !== "0";
   const sharedState = publicClassroomState_(state, board.id);
   if (materials.length && !materials.some(function (item) { return String(item.id) === String(sharedState.materialId); })) sharedState.materialId = materials[0].id;
@@ -987,6 +1046,7 @@ function classroomSync_(payload) {
     materialId: requestedMaterialId,
     materials: materials,
     areas: areas,
+    answerMasks: answerMasks,
     submissionCounts: includeSubmissionCounts ? submissionCountsForBoard_(board.id, requestedMaterialId, board, areas) : null,
     serverTime: now_()
   };
@@ -1152,7 +1212,8 @@ function createBoard_(payload) {
     appendRow_("materials", { id: materialId, boardId: board.id, name: payload.pdf.name || "主要教材", description: "", pdfFileId: file.driveId, pdfFileName: file.name, pdfMime: file.mime, order: 1, status: "啟用", createdAt: now, updatedAt: now });
   }
   saveAreas_(board.id, payload.areas || []);
-  return { ok: true, board: publicBoard_(board), materials: materialsForBoard_(board.id, board), areas: areasForBoard_(board.id, board) };
+  saveAnswerMasks_(board.id, payload.answerMasks || []);
+  return { ok: true, board: publicBoard_(board), materials: materialsForBoard_(board.id, board), areas: areasForBoard_(board.id, board), answerMasks: answerMasksForBoard_(board.id, board) };
 }
 
 function saveAreas_(boardId, areas) {
@@ -1227,11 +1288,13 @@ function updateBoard_(payload) {
   }
   updateRow_("boards", board.id, fields);
   if (payload.areas !== undefined) saveAreas_(board.id, payload.areas);
+  if (payload.answerMasks !== undefined) saveAnswerMasks_(board.id, payload.answerMasks);
   const updatedBoard = Object.assign({}, board, fields);
   const updatedMaterials = materialsForBoard_(board.id, updatedBoard);
   const updatedAreas = areasForBoard_(board.id, updatedBoard);
+  const updatedAnswerMasks = answerMasksForBoard_(board.id, updatedBoard);
   touchClassroomPulseCatalog_(updatedBoard, updatedMaterials, updatedAreas);
-  return { ok: true, board: publicBoard_(updatedBoard), materials: updatedMaterials, areas: updatedAreas };
+  return { ok: true, board: publicBoard_(updatedBoard), materials: updatedMaterials, areas: updatedAreas, answerMasks: updatedAnswerMasks };
 }
 
 function createMaterial_(payload) {
@@ -1254,7 +1317,7 @@ function createMaterial_(payload) {
   const updatedMaterials = materialsForBoard_(board.id, updatedBoard);
   const updatedAreas = areasForBoard_(board.id, updatedBoard);
   touchClassroomPulseCatalog_(updatedBoard, updatedMaterials, updatedAreas);
-  return { ok: true, material: publicMaterial_(material), board: publicBoard_(updatedBoard), materials: updatedMaterials, areas: updatedAreas };
+  return { ok: true, material: publicMaterial_(material), board: publicBoard_(updatedBoard), materials: updatedMaterials, areas: updatedAreas, answerMasks: answerMasksForBoard_(board.id, updatedBoard) };
 }
 
 function updateMaterial_(payload) {
@@ -1301,7 +1364,7 @@ function updateMaterial_(payload) {
   const updatedMaterials = materialsForBoard_(board.id, updatedBoard);
   const updatedAreas = areasForBoard_(board.id, updatedBoard);
   touchClassroomPulseCatalog_(updatedBoard, updatedMaterials, updatedAreas);
-  return { ok: true, material: publicMaterial_(Object.assign({}, material, fields)), board: publicBoard_(updatedBoard), materials: updatedMaterials, areas: updatedAreas };
+  return { ok: true, material: publicMaterial_(Object.assign({}, material, fields)), board: publicBoard_(updatedBoard), materials: updatedMaterials, areas: updatedAreas, answerMasks: answerMasksForBoard_(board.id, updatedBoard) };
 }
 
 function deleteMaterial_(payload) {
@@ -1327,6 +1390,7 @@ function deleteMaterial_(payload) {
   deleteRows_("files", function (file) { return String(file.boardId) === String(board.id) && String(file.materialId || "") === materialId; });
   deleteRows_("ink", function (item) { return String(item.boardId) === String(board.id) && String(item.materialId || legacyMaterialId_(board.id)) === materialId; });
   deleteRows_("areas", function (item) { return String(item.boardId) === String(board.id) && String(item.materialId || legacyMaterialId_(board.id)) === materialId; });
+  deleteRows_("answerMasks", function (item) { return String(item.boardId) === String(board.id) && String(item.materialId || legacyMaterialId_(board.id)) === materialId; });
   deleteRows_("materials", function (item) { return String(item.id) === materialId; });
   const remainingMaterials = materialsForBoard_(board.id, board).filter(function (item) { return String(item.id) !== materialId; });
   const replacement = remainingMaterials[0];
@@ -1348,7 +1412,7 @@ function deleteMaterial_(payload) {
   const updatedBoard = Object.assign({}, board, boardFields);
   const updatedAreas = areasForBoard_(board.id, updatedBoard);
   touchClassroomPulseCatalog_(updatedBoard, remainingMaterials, updatedAreas);
-  return { ok: true, materialId: materialId, materials: remainingMaterials, areas: updatedAreas, board: publicBoard_(updatedBoard) };
+  return { ok: true, materialId: materialId, materials: remainingMaterials, areas: updatedAreas, answerMasks: answerMasksForBoard_(board.id, updatedBoard), board: publicBoard_(updatedBoard) };
 }
 
 function archiveBoard_(payload) {
@@ -1402,6 +1466,7 @@ function deleteBoard_(payload) {
     files: deleteRows_("files", function (item) { return String(item.boardId) === boardId || submissions.some(function (submission) { return String(submission.id) === String(item.submissionId); }); }),
     submissions: deleteRows_("submissions", function (item) { return String(item.boardId) === boardId; }),
     areas: deleteRows_("areas", function (item) { return String(item.boardId) === boardId; }),
+    answerMasks: deleteRows_("answerMasks", function (item) { return String(item.boardId) === boardId; }),
     ink: deleteRows_("ink", function (item) { return String(item.boardId) === boardId; }),
     classroomState: deleteRows_("classroomState", function (item) { return String(item.boardId) === boardId; }),
     materials: deleteRows_("materials", function (item) { return String(item.boardId) === boardId; }),

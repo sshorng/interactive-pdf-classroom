@@ -44,6 +44,7 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
   await sleep(1400);
   const boardId = await evaluate("new URL(location.href).searchParams.get('board')");
   if (!boardId) throw new Error("目前頁面沒有 board 參數。");
+  await evaluate("state.touchMode = 'scroll'; localStorage.setItem('pdfw_touch_mode', 'scroll'); true");
   await evaluate("goView('review', new URL(location.href).searchParams.get('board'))");
   await sleep(1300);
 
@@ -62,6 +63,8 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
       window.clearInterval(state.pollTimer);
       state.pollTimer = null;
     }
+    state.lastReviewSubmissionPollAt = 0;
+    state.lastClassroomCountsPollAt = 0;
     let syncCalls = 0;
     let submissionCalls = 0;
     const syncOptions = [];

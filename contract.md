@@ -19,8 +19,8 @@
 `beginReviewInk(event: InkPointerEvent): void`、`moveReviewInk(event: InkPointerEvent): void`、`finishReviewStroke(event: InkPointerEvent | null, cancelled: boolean): void`、`cancelReviewStroke(event: InkPointerEvent | null): void` 必須對批改 session 遵守同一生命週期規則。
 每次有效落筆必須建立獨立 `InkStroke`。下一次有效落筆必須先封存殘留 session，再建立新的活動 session；不得以時間或距離自動合併不同接觸。
 `saveInk` payload 在既有單一教材資料上維持 `{ id, boardId, page, strokes }`；多教材資料可附加 `materialId`，回傳格式維持 `{ ok, annotation }`。`materialId` 必須同步寫入教材、問答區、筆跡、課堂狀態、作答及檔案索引，Drive JSON 內容格式不變。
-【凍結契約】只使用原生 HTML、Vanilla JavaScript、Vanilla CSS、PDF.js、Canvas、IndexedDB 及既有 GAS API，不新增第三方相依。中文文字使用全形標點，禁止破折號。保留既有輸入來源分流、預設筆畫粗細 2、手指捲動與捏合縮放、離線 outbox 及錯誤 Modal。不得加入生產環境事件除錯面板或改變既有 API 欄位。
-【範圍邊界】Apple Pencil 與課堂下拉重整原始契約只涉及 `index.html`、`tests/ink-lifecycle-cdp.js`、`tests/classroom-pull-refresh-cdp.js` 及治理文件；本輪經使用者授權擴充為可修改 `Code.gs`、`README.md` 及新增 `tests/multi-material-cdp.js`，以完成多教材資料層。不得修改 `rdq/`、既有其他專案或外層 AI_Agent 工作樹檔案。diff 必須逐檔可對帳。
+【凍結契約】只使用原生 HTML、Vanilla JavaScript、Vanilla CSS、PDF.js、Canvas、IndexedDB 及既有 GAS API；為修正已確認的 `Identity-V` 直排字型渲染問題，允許按需載入 PDFium 作為 PDF.js 的局部備援，不改變既有 PDF 上傳與資料格式。中文文字使用全形標點，禁止破折號。保留既有輸入來源分流、預設筆畫粗細 2、手指捲動與捏合縮放、離線 outbox 及錯誤 Modal。不得加入生產環境事件除錯面板或改變既有作答與批改 API 格式。
+【範圍邊界】Apple Pencil、課堂下拉重整、多教材、答案遮罩及學生作答導引涉及 `index.html`、`Code.gs`、`README.md`、`plan.md`、`premortem.md`、`contract.md` 及 `tests/` 下對應回歸測試。答案遮罩可新增「答案遮罩」工作表，但不得改寫問答區、學生作答或批改筆跡的既有資料格式。不得修改 `rdq/`、既有其他專案或外層 AI_Agent 工作樹檔案。diff 必須逐檔可對帳。
 </spec>
 
 <acceptance_criteria>
@@ -58,6 +58,15 @@
 31. `classroomSync` 必須回傳教材清單及完整問答區資料，並依要求的 `materialId` 回傳對應筆跡版本與作答數量。
 32. 既有單一 PDF 資料首次讀取時，必須可透過 `M-{boardId}-legacy` 映射繼續使用，且缺少 `materialId` 的既有資料不得被捨棄。
 33. 學生端課堂輪詢必須能套用教師共享的教材、頁碼與縮放，並保留學生自己的教材位置記錄。
+34. 含 `Identity-V` 直排字型的 PDF 必須可由 PDFium 備援渲染，且一般 PDF 仍維持 PDF.js 路徑。
+35. PDFium 文件必須依目前教材與檔案 ID 隔離，教材切換或 PDF 替換後不得使用舊文件。
+36. 答案遮罩必須以獨立資料表與 `materialId`、頁碼、矩形相對座標保存，不得重用問答圖釘座標。
+37. 教材編輯頁必須可拖曳建立、修改及刪除答案遮罩，並可保存後重新載入。
+38. 課堂投影端與學生端有答案遮罩時必須預設遮住，點擊只能揭示目前裝置的單一遮罩，且「全部遮回」必須恢復全遮。
+39. 教材編輯頁與批改彈窗不得套用答案遮罩，批改資料與教師筆跡必須保持完整。
+40. 答案遮罩回歸測試必須涵蓋學生端、課堂端、編輯端、逐一揭示、全部遮回及教材隔離。
+41. 學生選擇問答區後，目前 PDF 圖釘必須高亮，作答卡必須進入視覺焦點並可見。
+42. 學生作答卡必須提供上一題／下一題導覽，並依目前教材的頁碼與題目順序切換。
 </acceptance_criteria>
 
 <failure_protocol>
@@ -73,7 +82,7 @@
 <self_check>
 輸出前執行 2 輪自檢，每輪依序完成：
 1. 實際執行全部測試並貼上結果摘要，列出通過數、失敗數及關鍵輸出，不得以「應可通過」代替執行。
-2. 逐條核對 33 條 acceptance_criteria，每條附證據位置，包含測試名、檔名加行號或 diff 段落。
+2. 逐條核對 42 條 acceptance_criteria，每條附證據位置，包含測試名、檔名加行號或 diff 段落。
 3. diff 審查：逐檔核對是否落在範圍邊界內，範圍外變更一律停止並回報。
 4. 第二輪自檢必須重新確認線上 Pages commit、build 狀態及實際回應內容。
 自檢表僅供參考，不取代獨立驗證；不得因自檢通過而省略驗證員移交包。

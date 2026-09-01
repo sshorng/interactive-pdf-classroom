@@ -223,14 +223,24 @@
     .pdf-scroll { min-height: 620px; overflow: auto; padding: 34px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-x pan-y pinch-zoom; }
     .page-stage { position: relative; width: max-content; min-width: 340px; min-height: 440px; margin: 0 auto; background: #fff; box-shadow: 0 18px 38px rgba(38, 45, 41, .18); }
     .page-stage canvas { display: block; }
-    .zone-layer { position: absolute; inset: 0; pointer-events: none; touch-action: auto; z-index: 4; }
+    .answer-mask-layer { position: absolute; inset: 0; z-index: 5; pointer-events: none; touch-action: none; }
+    .answer-mask-layer.is-editor { pointer-events: auto; }
+    .answer-mask-layer.is-placing { cursor: crosshair; }
+    .answer-mask { position: absolute; display: grid; place-items: center; min-width: 0; min-height: 0; padding: 4px; overflow: hidden; color: #fffaf4; background: rgba(33, 72, 66, .94); border: 2px solid rgba(255,255,255,.9); border-radius: 8px; box-shadow: 0 5px 16px rgba(33,72,66,.25); font-size: 12px; font-weight: 800; line-height: 1.2; text-align: center; }
+    .answer-mask.is-covered { cursor: pointer; }
+    .answer-mask.is-editor { color: var(--teal-dark); background: rgba(255, 253, 248, .16); border: 2px dashed var(--accent); box-shadow: 0 0 0 1px rgba(255,255,255,.7); cursor: pointer; }
+    .answer-mask.is-editor:hover { background: rgba(215, 109, 80, .15); }
+    .answer-mask-draft { pointer-events: none; color: var(--accent-dark); background: rgba(215,109,80,.16); border-style: solid; }
+    .answer-mask-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .zone-layer { position: absolute; inset: 0; pointer-events: none; touch-action: auto; z-index: 6; }
     .zone-layer .zone { pointer-events: auto; }
     .zone-layer.is-placing { pointer-events: auto; cursor: crosshair; touch-action: none; }
     .zone { position: absolute; z-index: 2; display: grid; place-items: center; width: 32px; height: 32px; min-width: 32px; max-width: 32px; padding: 0; overflow: visible; color: #fffaf4; background: var(--accent); border: 2px solid #fff8ee; border-radius: 50% 50% 50% 0; text-align: center; box-shadow: 0 5px 14px rgba(49,95,89,.25); transform: translate(-50%, -50%) rotate(-45deg); }
     .zone::before, .zone::after { content: none; }
     .zone:hover, .zone.selected { background: var(--teal); border-color: #fff; transform: translate(-50%, -50%) rotate(-45deg) scale(1.08); }
-    .zone-label { display: block; color: #fffaf4; font-size: 12px; font-weight: 800; line-height: 1; transform: rotate(45deg); }
-    .zone-response-count { position: absolute; top: -13px; left: 22px; min-width: 22px; height: 18px; padding: 0 5px; color: var(--teal-dark); background: #fffdf8; border: 1px solid #d7e4dc; border-radius: 999px; box-shadow: 0 3px 9px rgba(49,95,89,.2); font-size: 10px; font-weight: 800; line-height: 16px; transform: rotate(45deg); }
+     .zone-label { display: block; color: #fffaf4; font-size: 12px; font-weight: 800; line-height: 1; transform: rotate(45deg); }
+     .zone.active { background: var(--accent-dark); border-color: #fff; box-shadow: 0 0 0 5px rgba(215,109,80,.22), 0 8px 20px rgba(49,95,89,.3); animation: zonePulse 1.4s ease-out infinite; }
+     .zone-response-count { position: absolute; top: -13px; left: 22px; min-width: 22px; height: 18px; padding: 0 5px; color: var(--teal-dark); background: #fffdf8; border: 1px solid #d7e4dc; border-radius: 999px; box-shadow: 0 3px 9px rgba(49,95,89,.2); font-size: 10px; font-weight: 800; line-height: 16px; transform: rotate(45deg); }
     .zone-status { display: none; }
     body.editor-mode .zone { cursor: grab; touch-action: none; }
     body.editor-mode .zone:active { cursor: grabbing; }
@@ -286,6 +296,7 @@
     .area-action-button.danger:hover { color: var(--danger); background: #fff2ee; border-color: #ecc7be; }
     .area-form-delete { margin-top: 6px; }
     .area-empty { padding: 12px; color: var(--muted); background: #f7f5ef; border-radius: 11px; font-size: 12px; }
+    .mask-coordinate-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 
     .student-shell { display: grid; gap: 16px; }
     .student-banner { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 24px 26px; background: linear-gradient(135deg, #315f59, #477c6f); border-radius: 22px; color: #f7fff9; box-shadow: var(--shadow); }
@@ -303,8 +314,12 @@
     .answer-panel-empty { display: grid; flex: 1; place-items: center; min-height: 220px; padding: 22px; color: var(--muted); background: #f7f5ef; border-radius: 15px; text-align: center; }
     .answer-panel-empty strong { display: block; margin-bottom: 6px; color: var(--teal-dark); font-size: 18px; }
     .answer-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 15px; }
-    .answer-panel-head h3 { margin-bottom: 3px; }
-    .answer-panel-head p { margin-bottom: 0; color: var(--muted); font-size: 12px; }
+     .answer-panel-head h3 { margin-bottom: 3px; }
+     .answer-panel-head p { margin-bottom: 0; color: var(--muted); font-size: 12px; }
+     .answer-panel.is-focused { animation: answerPanelFocus .75s ease-out; }
+     .student-answer-navigator { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -3px 0 13px; padding: 7px; background: #f5f3ec; border: 1px solid var(--line); border-radius: 11px; }
+     .student-answer-navigator .toolbar-button { min-width: 74px; min-height: 36px; padding: 6px 9px; font-size: 12px; }
+     .student-answer-position { color: var(--teal-dark); font-size: 12px; font-weight: 800; }
     .close-mini { display: grid; place-items: center; width: 36px; height: 36px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 10px; }
     .close-mini:hover { color: var(--danger); border-color: #e2bbb4; }
     .photo-drop { padding: 15px; background: #f8f6f0; border: 1px dashed #c9c9be; border-radius: 13px; }
@@ -478,10 +493,12 @@
     .pull-refresh-indicator.visible { opacity: 1; }
     .pull-refresh-indicator.refreshing .pull-icon { display: inline-block; animation: spin .8s linear infinite; }
 
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes popIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes spin { to { transform: rotate(360deg); } }
+     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+     @keyframes popIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+     @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+     @keyframes spin { to { transform: rotate(360deg); } }
+     @keyframes zonePulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(215,109,80,.2), 0 8px 20px rgba(49,95,89,.3); } 50% { box-shadow: 0 0 0 8px rgba(215,109,80,0), 0 8px 20px rgba(49,95,89,.3); } }
+     @keyframes answerPanelFocus { 0% { box-shadow: 0 0 0 0 rgba(215,109,80,.42); } 100% { box-shadow: 0 0 0 12px rgba(215,109,80,0); } }
 
     @media (max-width: 980px) {
       .dashboard-hero { grid-template-columns: 1fr; }
@@ -606,6 +623,7 @@
     const PDFJS_ASSET_BASE = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
     const PDF_CMAP_URL = PDFJS_ASSET_BASE + "cmaps/";
     const PDF_STANDARD_FONT_URL = PDFJS_ASSET_BASE + "standard_fonts/";
+    const PDFIUM_MODULE_URL = "https://unpkg.com/@hyzyla/pdfium@2.1.13/browser/cdn";
     const PDF_MAX_CANVAS_PIXELS = 12000000;
     const PDF_MAX_CANVAS_DIMENSION = 4096;
     const GAS_URL = resolveGasUrl();
@@ -621,6 +639,7 @@
       board: null,
       boards: [],
       areas: [],
+      answerMasks: [],
       pdf: null,
       pdfBytes: null,
       materials: [],
@@ -632,10 +651,22 @@
       studentMaterialPositions: new Map(),
       materialLoadToken: 0,
       materialSelectionToken: 0,
+      pdfiumLibrary: null,
+      pdfiumLibraryPromise: null,
+      pdfiumDocument: null,
+      pdfiumDocumentMaterialId: "",
+      pdfiumDocumentFileId: "",
+      pdfiumDocumentPromise: null,
+      pdfiumDocumentPromiseMaterialId: "",
+      pdfiumDocumentPromiseFileId: "",
+      pdfiumErrorShown: false,
       currentPage: 1,
       zoom: 1,
       renderToken: 0,
       drawingZone: false,
+      answerMaskDrawing: false,
+      answerMaskDraft: null,
+      revealedAnswerMaskIds: new Set(),
       selectedAreaId: "",
       pendingPdf: null,
       activeAreaId: "",
@@ -692,11 +723,71 @@
 
     function pdfDocumentOptions(bytes) {
       return {
-        data: bytes,
+        data: bytes && typeof bytes.slice === "function" ? bytes.slice() : bytes,
         cMapUrl: PDF_CMAP_URL,
         cMapPacked: true,
         standardFontDataUrl: PDF_STANDARD_FONT_URL
       };
+    }
+
+    function disposePdfiumDocument() {
+      if (state.pdfiumDocument && typeof state.pdfiumDocument.destroy === "function") state.pdfiumDocument.destroy();
+      state.pdfiumDocument = null;
+      state.pdfiumDocumentMaterialId = "";
+      state.pdfiumDocumentFileId = "";
+    }
+
+    async function loadPdfiumLibrary() {
+      if (state.pdfiumLibrary) return state.pdfiumLibrary;
+      if (!state.pdfiumLibraryPromise) {
+        state.pdfiumLibraryPromise = (async function () {
+          const module = await import(PDFIUM_MODULE_URL);
+          if (!module.PDFiumLibrary) throw new Error("PDFium 相容引擎尚未載入。");
+          return module.PDFiumLibrary.init({ disableCDNWarning: true });
+        })();
+      }
+      try {
+        state.pdfiumLibrary = await state.pdfiumLibraryPromise;
+        return state.pdfiumLibrary;
+      } catch (error) {
+        state.pdfiumLibraryPromise = null;
+        throw error;
+      }
+    }
+
+    async function loadPdfiumDocument(materialId) {
+      const targetMaterialId = String(materialId || "");
+      const material = activeMaterial();
+      const targetFileId = String(material && material.pdfFileId || "");
+      if (state.pdfiumDocument && state.pdfiumDocumentMaterialId === targetMaterialId && state.pdfiumDocumentFileId === targetFileId) return state.pdfiumDocument;
+      if (state.pdfiumDocumentPromise && state.pdfiumDocumentPromiseMaterialId === targetMaterialId && state.pdfiumDocumentPromiseFileId === targetFileId) return state.pdfiumDocumentPromise;
+      const sourceBytes = state.pdfBytes && state.pdfBytes.byteLength ? state.pdfBytes.slice() : null;
+      if (!sourceBytes || !sourceBytes.byteLength) throw new Error("PDF 原始資料尚未準備完成。");
+      const request = (async function () {
+        const library = await loadPdfiumLibrary();
+        const document = await library.loadDocument(sourceBytes);
+        if (String(state.activeMaterialId || "") !== targetMaterialId || String(activeMaterial() && activeMaterial().pdfFileId || "") !== targetFileId) {
+          document.destroy();
+          return null;
+        }
+        disposePdfiumDocument();
+        state.pdfiumDocument = document;
+        state.pdfiumDocumentMaterialId = targetMaterialId;
+        state.pdfiumDocumentFileId = targetFileId;
+        return document;
+      })();
+      state.pdfiumDocumentPromise = request;
+      state.pdfiumDocumentPromiseMaterialId = targetMaterialId;
+      state.pdfiumDocumentPromiseFileId = targetFileId;
+      try {
+        return await request;
+      } finally {
+        if (state.pdfiumDocumentPromise === request) {
+          state.pdfiumDocumentPromise = null;
+          state.pdfiumDocumentPromiseMaterialId = "";
+          state.pdfiumDocumentPromiseFileId = "";
+        }
+      }
     }
 
     function resolveGasUrl() {
@@ -795,6 +886,30 @@
       return (Array.isArray(areas) ? areas : []).map(function (area) {
         return Object.assign({}, area, { materialId: String(area.materialId || legacyId) });
       });
+    }
+
+    function normalizeAnswerMasks(masks, boardId) {
+      const legacyId = legacyMaterialId(boardId);
+      return (Array.isArray(masks) ? masks : []).map(function (mask, index) {
+        const materialId = String(mask && mask.materialId || legacyId);
+        const width = clamp(Number(mask && mask.width) || 0.2, 0.01, 1);
+        const height = clamp(Number(mask && mask.height) || 0.12, 0.01, 1);
+        const x = clamp(Number(mask && mask.x) || 0, 0, Math.max(0, 1 - width));
+        const y = clamp(Number(mask && mask.y) || 0, 0, Math.max(0, 1 - height));
+        return Object.assign({}, mask, {
+          id: String(mask && mask.id || "AM-" + String(boardId || "board") + "-" + (index + 1)),
+          boardId: String(mask && mask.boardId || boardId || ""),
+          materialId: materialId,
+          page: Math.max(1, Math.floor(Number(mask && mask.page) || 1)),
+          x: x,
+          y: y,
+          width: width,
+          height: height,
+          title: String(mask && mask.title || "答案遮罩 " + (index + 1)),
+          order: Number(mask && mask.order) || index + 1,
+          status: String(mask && mask.status || "啟用")
+        });
+      }).filter(function (mask) { return mask.status === "啟用"; }).sort(compareAnswerMasksByPosition);
     }
 
     function activeMaterial() {
@@ -1567,7 +1682,7 @@
          const materials = normalizeMaterials(board, board.materials);
          const publicState = Object.assign({}, sharedState, { materialId: String(sharedState.materialId || legacyMaterialId(board.id)) });
          if (materials.length && !materials.some(function (item) { return String(item.id) === String(publicState.materialId); })) publicState.materialId = materials[0].id;
-          return { ok: true, state: publicState, inkVersion: inkVersion, inkChanged: inkChanged, ink: inkChanged ? rows : null, inkDelta: false, inkReset: inkChanged, inkPage: inkPage, materialId: materialId, materials: materials, areas: normalizeAreas(board.areas || [], board.id), submissionCounts: String(data.includeSubmissionCounts || "1") === "0" ? null : await localSubmissionCounts(board.id, materialId) };
+           return { ok: true, state: publicState, inkVersion: inkVersion, inkChanged: inkChanged, ink: inkChanged ? rows : null, inkDelta: false, inkReset: inkChanged, inkPage: inkPage, materialId: materialId, materials: materials, areas: normalizeAreas(board.areas || [], board.id), answerMasks: normalizeAnswerMasks(board.answerMasks || [], board.id), submissionCounts: String(data.includeSubmissionCounts || "1") === "0" ? null : await localSubmissionCounts(board.id, materialId) };
       }
       if (action === "saveClassroomState") {
         const board = await localGet("boards", data.boardId);
@@ -1580,7 +1695,7 @@
       if (action === "getBoard") {
         const board = await localGet("boards", data.boardId);
         if (!board || board.status === "封存") throw new Error("找不到指定教材版面。");
-        return { ok: true, board: board, materials: board.materials || [], areas: board.areas || [] };
+         return { ok: true, board: board, materials: board.materials || [], areas: board.areas || [], answerMasks: board.answerMasks || [] };
       }
       if (action === "getFile") {
         const file = await localGet("files", data.fileId);
@@ -1590,7 +1705,7 @@
         return { ok: true, fileId: file.id, name: file.name, mime: file.mime || parts.mime, base64: parts.base64 };
       }
       if (action === "createBoard") {
-        const board = { id: data.clientBoardId || createId("B"), name: String(data.name || "新教材").trim(), description: String(data.description || "").trim(), pdfFileId: "", pdfFileName: "", pdfMime: "", materials: [], status: "啟用", areas: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+         const board = { id: data.clientBoardId || createId("B"), name: String(data.name || "新教材").trim(), description: String(data.description || "").trim(), pdfFileId: "", pdfFileName: "", pdfMime: "", materials: [], status: "啟用", areas: [], answerMasks: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
         if (!board.name) throw new Error("請填寫教材版面名稱。");
          if (data.pdf && data.pdf.data) {
            const materialId = legacyMaterialId(board.id);
@@ -1599,10 +1714,11 @@
           board.pdfFileName = data.pdf.name || "教材.pdf";
           board.pdfMime = data.pdf.mime || "application/pdf";
           board.materials = [{ id: materialId, boardId: board.id, name: data.pdf.name || "主要教材", description: "", pdfFileId: fileId, pdfFileName: board.pdfFileName, pdfMime: board.pdfMime, order: 1, status: "啟用", legacy: true, createdAt: board.createdAt, updatedAt: board.updatedAt }];
-        }
-        board.areas = normalizeAreas(Array.isArray(data.areas) ? data.areas : [], board.id);
-        await localPut("boards", board);
-        return { ok: true, board: board, materials: board.materials, areas: board.areas };
+         }
+         board.areas = normalizeAreas(Array.isArray(data.areas) ? data.areas : [], board.id);
+         board.answerMasks = normalizeAnswerMasks(Array.isArray(data.answerMasks) ? data.answerMasks : [], board.id);
+         await localPut("boards", board);
+         return { ok: true, board: board, materials: board.materials, areas: board.areas, answerMasks: board.answerMasks };
       }
       if (action === "updateBoard") {
         const board = await localGet("boards", data.boardId);
@@ -1630,14 +1746,15 @@
             board.pdfMime = data.pdf.mime || "application/pdf";
           }
         }
-        if (data.areas !== undefined) {
-          const areas = normalizeAreas(data.areas, board.id);
-          await removeLocalSubmissionsForRemovedAreas(board.id, areas);
-          board.areas = areas;
-        }
-        board.updatedAt = new Date().toISOString();
-        await localPut("boards", board);
-        return { ok: true, board: board, materials: board.materials || [], areas: board.areas || [] };
+         if (data.areas !== undefined) {
+           const areas = normalizeAreas(data.areas, board.id);
+           await removeLocalSubmissionsForRemovedAreas(board.id, areas);
+           board.areas = areas;
+         }
+         if (data.answerMasks !== undefined) board.answerMasks = normalizeAnswerMasks(data.answerMasks, board.id);
+         board.updatedAt = new Date().toISOString();
+         await localPut("boards", board);
+         return { ok: true, board: board, materials: board.materials || [], areas: board.areas || [], answerMasks: board.answerMasks || [] };
       }
       if (action === "createMaterial") {
         const board = await localGet("boards", data.boardId);
@@ -1653,7 +1770,7 @@
         board.materials.push(material);
         board.updatedAt = now;
         await localPut("boards", board);
-         return { ok: true, material: material, materials: board.materials, areas: board.areas || [], board: board };
+          return { ok: true, material: material, materials: board.materials, areas: board.areas || [], answerMasks: board.answerMasks || [], board: board };
       }
       if (action === "updateMaterial") {
         const board = await localGet("boards", data.boardId);
@@ -1678,7 +1795,7 @@
         }
         board.updatedAt = material.updatedAt;
         await localPut("boards", board);
-         return { ok: true, material: material, materials: board.materials, areas: board.areas || [], board: board };
+          return { ok: true, material: material, materials: board.materials, areas: board.areas || [], answerMasks: board.answerMasks || [], board: board };
       }
       if (action === "deleteMaterial") {
         const board = await localGet("boards", data.boardId);
@@ -1690,7 +1807,8 @@
          if (!removedMaterial) throw new Error("找不到指定課堂教材。");
         const removedAreas = (board.areas || []).filter(function (area) { return localMaterialIdForArea(area, board.id) === materialId; });
           await removeLocalSubmissionsForRemovedAreas(board.id, (board.areas || []).filter(function (area) { return removedAreas.indexOf(area) < 0; }), materialId);
-        board.areas = (board.areas || []).filter(function (area) { return localMaterialIdForArea(area, board.id) !== materialId; });
+         board.areas = (board.areas || []).filter(function (area) { return localMaterialIdForArea(area, board.id) !== materialId; });
+         board.answerMasks = normalizeAnswerMasks(board.answerMasks || [], board.id).filter(function (mask) { return String(mask.materialId || legacyMaterialId(board.id)) !== materialId; });
          const inkRows = (await localAll("ink")).filter(function (item) { return String(item.boardId) === String(board.id) && String(item.materialId || legacyMaterialId(board.id)) === materialId; });
          for (const item of inkRows) await localDelete("ink", item.id);
          for (const item of await localAll("outbox")) {
@@ -1705,7 +1823,7 @@
         board.materials.forEach(function (item, index) { item.order = index + 1; });
         board.updatedAt = new Date().toISOString();
         await localPut("boards", board);
-         return { ok: true, materialId: materialId, materials: board.materials, areas: board.areas || [], board: board };
+          return { ok: true, materialId: materialId, materials: board.materials, areas: board.areas || [], answerMasks: board.answerMasks || [], board: board };
       }
       if (action === "archiveBoard") {
         const board = await localGet("boards", data.boardId);
@@ -2050,6 +2168,7 @@
       const token = ++state.materialLoadToken;
       if (!material || !material.pdfFileId) {
         if (token === state.materialLoadToken) {
+          disposePdfiumDocument();
           state.pdf = null;
           state.pdfBytes = null;
         }
@@ -2101,9 +2220,10 @@
                 if (String(state.boardId) === String(boardId)) {
                   const previousActiveMaterial = activeMaterial();
                   const previousActiveMaterialId = String(state.activeMaterialId || "");
-                  state.board = remote.board;
-                  state.materials = normalizeMaterials(remote.board, remote.materials || remote.board.materials);
-                  state.areas = normalizeAreas(remote.areas || [], boardId);
+                   state.board = remote.board;
+                   state.materials = normalizeMaterials(remote.board, remote.materials || remote.board.materials);
+                   state.areas = normalizeAreas(remote.areas || [], boardId);
+                   state.answerMasks = normalizeAnswerMasks(remote.answerMasks || remote.board.answerMasks || [], boardId);
                   if (!state.materials.some(function (item) { return String(item.id) === String(state.activeMaterialId); })) state.activeMaterialId = state.materials[0] ? state.materials[0].id : "";
                   const nextActiveMaterial = activeMaterial();
                   const activeMaterialChanged = previousActiveMaterialId !== String(state.activeMaterialId || "");
@@ -2136,15 +2256,20 @@
       state.boardId = result.board.id;
       state.materials = normalizeMaterials(state.board, result.materials || state.board.materials);
       state.areas = normalizeAreas(result.areas || state.board.areas || [], state.board.id);
+      state.answerMasks = normalizeAnswerMasks(result.answerMasks || state.board.answerMasks || [], state.board.id);
       const storedMaterialId = state.view === "student" ? localStorage.getItem(APP_KEY + "student_material_" + state.board.id) : "";
       state.activeMaterialId = state.materials.some(function (item) { return String(item.id) === String(storedMaterialId); }) ? storedMaterialId : (state.materials[0] ? state.materials[0].id : "");
       state.pdf = null;
       state.pdfBytes = null;
+      disposePdfiumDocument();
       state.materialPdfCache.clear();
       state.materialPdfBytesCache.clear();
       state.materialPdfLoadCache.clear();
       state.fileRequestCache.clear();
       state.materialSelectionToken += 1;
+      state.answerMaskDrawing = false;
+      state.answerMaskDraft = null;
+      state.revealedAnswerMaskIds = new Set();
       state.studentMaterialPositions.clear();
       window.clearTimeout(state.inkSaveTimer);
       state.inkSaveTimer = null;
@@ -2319,9 +2444,11 @@
       await renderPdfPage();
     }
 
-    function bindEditorEvents() {
-       setupTeacherPdfWorkspace(false);
-       ensureMaterialControls("editor");
+     function bindEditorEvents() {
+        setupTeacherPdfWorkspace(false);
+        ensureMaterialControls("editor");
+        ensureAnswerMaskControls("editor");
+        ensureAnswerMaskEditorPanel();
        document.getElementById("backManagerButton").addEventListener("click", function () { goView("manager"); });
       document.getElementById("saveBoardButton").addEventListener("click", saveEditorBoard);
       document.getElementById("prevPageButton").addEventListener("click", function () { changePage(-1); });
@@ -2359,7 +2486,7 @@
       });
     }
 
-    function setupTeacherPdfWorkspace(includeInk = true) {
+     function setupTeacherPdfWorkspace(includeInk = true) {
       const stage = document.getElementById("pageStage");
       const zoneButton = document.getElementById("drawZoneButton");
       const toolbar = zoneButton ? zoneButton.parentElement : document.getElementById("teacherPdfToolbar");
@@ -2380,11 +2507,12 @@
         canvas.style.willChange = "transform";
         stage.insertBefore(canvas, zoneLayer || null);
       }
-      if (zoneButton) zoneButton.textContent = "＋ 放置圖釘";
-      if (!includeInk) {
-        updateInkControls();
-        return;
-      }
+       if (zoneButton) zoneButton.textContent = "＋ 放置圖釘";
+       if (!includeInk) {
+         updateInkControls();
+         return;
+       }
+       ensureAnswerMaskControls("review");
       if (!document.getElementById("inkControls")) {
         const controls = document.createElement("div");
         controls.id = "inkControls";
@@ -2882,7 +3010,8 @@
         if (state.board) state.board.materials = state.materials;
         activeMaterialMissing = Boolean(state.activeMaterialId && !state.materials.some(function (item) { return String(item.id) === String(state.activeMaterialId); }));
       }
-      if (Array.isArray(result.areas) && !hasPendingCatalogMutation) state.areas = normalizeAreas(result.areas, state.boardId);
+       if (Array.isArray(result.areas) && !hasPendingCatalogMutation) state.areas = normalizeAreas(result.areas, state.boardId);
+       if (Array.isArray(result.answerMasks) && !hasPendingCatalogMutation) state.answerMasks = normalizeAnswerMasks(result.answerMasks, state.boardId);
       if (activeMaterialPdfChanged) {
         state.materialPdfCache.delete(requestedMaterialId);
         state.materialPdfBytesCache.delete(requestedMaterialId);
@@ -3118,7 +3247,8 @@
       if (localReviewSelection) scheduleClassroomStateSave();
       if (viewAtStart === "student" && previousMaterialId && previousMaterialId !== targetMaterialId) saveStudentMaterialPosition();
       if (viewAtStart === "student" && previousMaterialId !== targetMaterialId) state.studentSubmissions.clear();
-      state.activeMaterialId = targetMaterialId;
+       state.activeMaterialId = targetMaterialId;
+       state.revealedAnswerMaskIds = new Set();
       if (viewAtStart === "student") {
         try { localStorage.setItem(APP_KEY + "student_material_" + state.boardId, state.activeMaterialId); } catch (error) {}
       }
@@ -3173,9 +3303,10 @@
         if (file.size > MAX_PDF_BYTES) throw new Error("PDF 超過 20 MB，請先壓縮檔案後再上傳。");
         const pdf = { name: file.name, mime: "application/pdf", data: await fileToDataUrl(file) };
         const result = await commitLocalMutation("createMaterial", { boardId: state.board.id, id: createId("M"), name: name, pdf: pdf });
-        if (result.board) state.board = result.board;
-        state.materials = normalizeMaterials(state.board, result.board && result.board.materials || state.materials.concat([result.material]));
-        state.areas = normalizeAreas(result.areas || state.areas, state.board.id);
+         if (result.board) state.board = result.board;
+         state.materials = normalizeMaterials(state.board, result.board && result.board.materials || state.materials.concat([result.material]));
+         state.areas = normalizeAreas(result.areas || state.areas, state.board.id);
+         state.answerMasks = normalizeAnswerMasks(result.answerMasks || state.board.answerMasks || state.answerMasks, state.board.id);
         await selectMaterial(result.material.id);
         showToast(state.demo ? "PDF 教材已加入課堂。" : "教材已先儲存在本機，背景同步中。", state.demo ? "success" : "warning");
         return true;
@@ -3192,7 +3323,8 @@
         const prefix = String(material.id) + "|";
         Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
         state.teacherInkVersions.delete(String(material.id));
-        state.areas = state.areas.filter(function (area) { return String(area.materialId) !== String(material.id); });
+         state.areas = state.areas.filter(function (area) { return String(area.materialId) !== String(material.id); });
+         state.answerMasks = state.answerMasks.filter(function (mask) { return String(mask.materialId) !== String(material.id); });
         state.materials = normalizeMaterials(state.board, result.materials || (state.materials.filter(function (item) { return String(item.id) !== String(material.id); })));
         const next = state.materials[0];
         if (next) await selectMaterial(next.id);
@@ -3769,9 +3901,308 @@
       context.restore();
     }
 
-    function compareAreasByPosition(a, b) {
-      return (Number(a.page) || 1) - (Number(b.page) || 1) || (Number(a.y) || 0) - (Number(b.y) || 0) || (Number(a.x) || 0) - (Number(b.x) || 0) || (Number(a.order) || 0) - (Number(b.order) || 0) || String(a.id || "").localeCompare(String(b.id || ""));
-    }
+     function compareAreasByPosition(a, b) {
+       return (Number(a.page) || 1) - (Number(b.page) || 1) || (Number(a.y) || 0) - (Number(b.y) || 0) || (Number(a.x) || 0) - (Number(b.x) || 0) || (Number(a.order) || 0) - (Number(b.order) || 0) || String(a.id || "").localeCompare(String(b.id || ""));
+     }
+
+     function compareAnswerMasksByPosition(a, b) {
+       return (Number(a.page) || 1) - (Number(b.page) || 1) || (Number(a.y) || 0) - (Number(b.y) || 0) || (Number(a.x) || 0) - (Number(b.x) || 0) || (Number(a.order) || 0) - (Number(b.order) || 0) || String(a.id || "").localeCompare(String(b.id || ""));
+     }
+
+     function currentMaterialAnswerMasks() {
+       const materialId = String(state.activeMaterialId || legacyMaterialId(state.boardId));
+       return (state.answerMasks || []).filter(function (mask) { return String(mask.materialId || legacyMaterialId(state.boardId)) === materialId; }).sort(compareAnswerMasksByPosition);
+     }
+
+     function isRevealMaskView() {
+       return state.view === "student" || state.view === "review";
+     }
+
+     function pageAnswerMasks() {
+       return currentMaterialAnswerMasks().filter(function (mask) { return Number(mask.page) === Number(state.currentPage); });
+     }
+
+     function ensureAnswerMaskEditorPanel() {
+       if (state.view !== "editor" || document.getElementById("answerMaskList")) return;
+       const sidebar = document.querySelector(".workspace-shell .workspace-sidebar");
+       if (!sidebar) return;
+       const section = document.createElement("div");
+       section.className = "sidebar-section answer-mask-editor-section";
+       section.innerHTML = "<div class=\"sidebar-title\"><span>答案遮罩</span><span class=\"meta-chip\" id=\"answerMaskCount\">0</span></div><p class=\"helper\">拖曳 PDF 上的答案範圍建立遮罩，課堂與學生頁會預設遮住。</p><div class=\"area-list\" id=\"answerMaskList\"></div>";
+       sidebar.appendChild(section);
+     }
+
+     function ensureAnswerMaskControls(view) {
+       const toolbar = view === "student" ? document.querySelector(".student-workspace .pdf-toolbar") : (view === "review" ? document.getElementById("teacherPdfToolbar") : document.querySelector(".workspace-shell .pdf-toolbar"));
+       if (!toolbar) return;
+       if (view === "editor") {
+         if (document.getElementById("drawAnswerMaskButton")) return;
+         const group = document.createElement("div");
+         group.className = "toolbar-group";
+         const button = document.createElement("button");
+         button.className = "toolbar-button";
+         button.id = "drawAnswerMaskButton";
+         button.type = "button";
+         button.textContent = "＋ 答案遮罩";
+         button.addEventListener("click", toggleAnswerMaskDrawing);
+         group.appendChild(button);
+         toolbar.appendChild(group);
+         return;
+       }
+       if (view !== "student" && view !== "review") return;
+       if (toolbar.querySelector("[data-answer-mask-controls]")) return;
+       const group = document.createElement("div");
+       group.className = "toolbar-group answer-mask-controls";
+       group.dataset.answerMaskControls = view;
+       const status = document.createElement("span");
+       status.className = "toolbar-label answer-mask-status";
+       status.dataset.answerMaskStatus = "1";
+       const button = document.createElement("button");
+       button.className = "toolbar-button";
+       button.dataset.answerMaskHideAll = "1";
+       button.type = "button";
+       button.textContent = "全部遮回";
+       button.addEventListener("click", hideAllAnswerMasks);
+       group.appendChild(status);
+       group.appendChild(button);
+       toolbar.appendChild(group);
+     }
+
+     function renderRevealControls() {
+       const masks = pageAnswerMasks();
+       const revealed = state.revealedAnswerMaskIds || new Set();
+       document.querySelectorAll("[data-answer-mask-status]").forEach(function (item) {
+         const hiddenCount = masks.filter(function (mask) { return !revealed.has(String(mask.id)); }).length;
+         item.textContent = hiddenCount ? "答案遮罩 " + hiddenCount + " 個" : (masks.length ? "答案已揭示" : "本頁無答案遮罩");
+       });
+       document.querySelectorAll("[data-answer-mask-hide-all]").forEach(function (button) {
+         button.disabled = !masks.length || masks.every(function (mask) { return !revealed.has(String(mask.id)); });
+       });
+       const editorButton = document.getElementById("drawAnswerMaskButton");
+       if (editorButton) {
+         editorButton.classList.toggle("active", Boolean(state.answerMaskDrawing));
+         editorButton.textContent = state.answerMaskDrawing ? "正在框選答案" : "＋ 答案遮罩";
+       }
+     }
+
+     function revealAnswerMask(maskId) {
+       if (!isRevealMaskView()) return;
+       const mask = pageAnswerMasks().find(function (item) { return String(item.id) === String(maskId); });
+       if (!mask) return;
+       if (!state.revealedAnswerMaskIds) state.revealedAnswerMaskIds = new Set();
+       state.revealedAnswerMaskIds.add(String(mask.id));
+       renderRevealMasks();
+     }
+
+     function hideAllAnswerMasks() {
+       state.revealedAnswerMaskIds = new Set();
+       renderRevealMasks();
+     }
+
+     function renderRevealMasks() {
+       const layer = document.getElementById("answerMaskLayer");
+       if (!layer) return;
+       layer.innerHTML = "";
+       const editor = state.view === "editor";
+       const revealed = state.revealedAnswerMaskIds || new Set();
+       layer.classList.toggle("is-editor", editor);
+       layer.classList.toggle("is-placing", editor && Boolean(state.answerMaskDrawing));
+       pageAnswerMasks().forEach(function (mask) {
+         if (!editor && revealed.has(String(mask.id))) return;
+         const element = document.createElement("button");
+         element.type = "button";
+         element.className = "answer-mask" + (editor ? " is-editor" : " is-covered");
+         element.dataset.answerMaskId = mask.id;
+         element.style.left = (Number(mask.x) * 100) + "%";
+         element.style.top = (Number(mask.y) * 100) + "%";
+         element.style.width = (Number(mask.width) * 100) + "%";
+         element.style.height = (Number(mask.height) * 100) + "%";
+         element.title = editor ? "編輯「" + (mask.title || "答案遮罩") + "」" : "點擊揭示答案";
+         element.setAttribute("aria-label", element.title);
+         element.innerHTML = "<span class=\"answer-mask-label\">" + escapeHtml(editor ? (mask.title || "答案遮罩") : "點擊揭示答案") + "</span>";
+         element.addEventListener("click", function (event) {
+           event.preventDefault();
+           event.stopPropagation();
+           if (editor) openAnswerMaskForm(mask);
+           else revealAnswerMask(mask.id);
+         });
+         layer.appendChild(element);
+       });
+       if (editor && state.answerMaskDraft) {
+         const draft = document.createElement("div");
+         draft.className = "answer-mask answer-mask-draft is-editor";
+         draft.style.left = (state.answerMaskDraft.x * 100) + "%";
+         draft.style.top = (state.answerMaskDraft.y * 100) + "%";
+         draft.style.width = (state.answerMaskDraft.width * 100) + "%";
+         draft.style.height = (state.answerMaskDraft.height * 100) + "%";
+         draft.innerHTML = "<span class=\"answer-mask-label\">拖曳完成</span>";
+         layer.appendChild(draft);
+       }
+       renderRevealControls();
+       renderAnswerMaskList();
+     }
+
+     function bindAnswerMaskStageEvents() {
+       const stage = document.getElementById("pageStage");
+       if (!stage || stage.dataset.answerMaskBound === "1") return;
+       stage.dataset.answerMaskBound = "1";
+       stage.addEventListener("click", function (event) {
+         if (!isRevealMaskView() || (event.target.closest && event.target.closest(".zone, .answer-mask"))) return;
+         const rect = stage.getBoundingClientRect();
+         if (!rect.width || !rect.height) return;
+         const x = (event.clientX - rect.left) / rect.width;
+         const y = (event.clientY - rect.top) / rect.height;
+         const mask = pageAnswerMasks().slice().reverse().find(function (item) {
+           return x >= Number(item.x) && x <= Number(item.x) + Number(item.width) && y >= Number(item.y) && y <= Number(item.y) + Number(item.height);
+         });
+         if (mask) revealAnswerMask(mask.id);
+       });
+     }
+
+     function answerMaskPoint(event, layer) {
+       const rect = layer.getBoundingClientRect();
+       return {
+         x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
+         y: clamp((event.clientY - rect.top) / rect.height, 0, 1)
+       };
+     }
+
+     function answerMaskRectangle(start, end) {
+       const x = Math.min(start.x, end.x);
+       const y = Math.min(start.y, end.y);
+       return { x: x, y: y, width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) };
+     }
+
+     function bindAnswerMaskEditor() {
+       const layer = document.getElementById("answerMaskLayer");
+       if (!layer || layer.dataset.editorBound === "1") return;
+       layer.dataset.editorBound = "1";
+       let start = null;
+       layer.addEventListener("pointerdown", function (event) {
+         if (state.view !== "editor" || !state.answerMaskDrawing || (event.target.closest && event.target.closest(".answer-mask"))) return;
+         const point = answerMaskPoint(event, layer);
+         start = point;
+         state.answerMaskDraft = { x: point.x, y: point.y, width: 0, height: 0 };
+         try { layer.setPointerCapture(event.pointerId); } catch (error) {}
+         event.preventDefault();
+         renderRevealMasks();
+       });
+       layer.addEventListener("pointermove", function (event) {
+         if (!start || state.view !== "editor") return;
+         state.answerMaskDraft = answerMaskRectangle(start, answerMaskPoint(event, layer));
+         event.preventDefault();
+         renderRevealMasks();
+       });
+       layer.addEventListener("pointerup", function (event) {
+         if (!start) return;
+         const draft = answerMaskRectangle(start, answerMaskPoint(event, layer));
+         start = null;
+         state.answerMaskDraft = null;
+         try { if (layer.hasPointerCapture(event.pointerId)) layer.releasePointerCapture(event.pointerId); } catch (error) {}
+         if (draft.width < 0.015 || draft.height < 0.015) {
+           renderRevealMasks();
+           return;
+         }
+         const count = currentMaterialAnswerMasks().length + 1;
+         const mask = Object.assign({}, draft, { id: createId("AM"), boardId: state.boardId, materialId: state.activeMaterialId || legacyMaterialId(state.boardId), page: state.currentPage, title: "答案遮罩 " + count, order: count });
+         state.answerMasks.push(mask);
+         state.answerMaskDrawing = false;
+         renderRevealMasks();
+         showToast("答案遮罩已建立，點擊遮罩可修改範圍與標籤。", "success");
+       });
+       layer.addEventListener("pointercancel", function () {
+         start = null;
+         state.answerMaskDraft = null;
+         renderRevealMasks();
+       });
+     }
+
+     function toggleAnswerMaskDrawing() {
+       if (state.view !== "editor") return;
+       state.answerMaskDrawing = !state.answerMaskDrawing;
+       if (state.answerMaskDrawing && state.drawingZone) toggleZoneDrawing();
+       renderRevealMasks();
+       renderRevealControls();
+     }
+
+     function syncAnswerMaskOrder() {
+       state.answerMasks = (state.answerMasks || []).sort(compareAnswerMasksByPosition);
+       state.answerMasks.forEach(function (mask, index) { mask.order = index + 1; });
+       return state.answerMasks;
+     }
+
+     function renderAnswerMaskList() {
+       const list = document.getElementById("answerMaskList");
+       const count = document.getElementById("answerMaskCount");
+       if (!list) return;
+       const masks = currentMaterialAnswerMasks();
+       if (count) count.textContent = masks.length;
+       if (!masks.length) {
+         list.innerHTML = "<div class=\"area-empty\">尚未設定答案遮罩。</div>";
+         return;
+       }
+       list.innerHTML = masks.map(function (mask, index) {
+         return "<div class=\"area-item\" data-answer-mask-item=\"" + escapeHtml(mask.id) + "\"><span class=\"area-number\">" + (index + 1) + "</span><span class=\"area-item-copy\"><strong>" + escapeHtml(mask.title || "答案遮罩 " + (index + 1)) + "</strong><small>第 " + mask.page + " 頁</small></span><span class=\"area-item-actions\"><button class=\"area-action-button\" data-answer-mask-edit=\"" + escapeHtml(mask.id) + "\" type=\"button\" title=\"編輯答案遮罩\" aria-label=\"編輯答案遮罩\">✎</button><button class=\"area-action-button danger\" data-answer-mask-delete=\"" + escapeHtml(mask.id) + "\" type=\"button\" title=\"刪除答案遮罩\" aria-label=\"刪除答案遮罩\">×</button></span></div>";
+       }).join("");
+       list.querySelectorAll("[data-answer-mask-item]").forEach(function (item) {
+         item.addEventListener("click", function () {
+           const mask = state.answerMasks.find(function (candidate) { return String(candidate.id) === String(item.dataset.answerMaskItem); });
+           if (!mask) return;
+           state.currentPage = Number(mask.page) || 1;
+           renderPdfPage();
+         });
+       });
+       list.querySelectorAll("[data-answer-mask-edit]").forEach(function (button) {
+         button.addEventListener("click", function (event) {
+           event.stopPropagation();
+           const mask = state.answerMasks.find(function (candidate) { return String(candidate.id) === String(button.dataset.answerMaskEdit); });
+           if (mask) openAnswerMaskForm(mask);
+         });
+       });
+       list.querySelectorAll("[data-answer-mask-delete]").forEach(function (button) {
+         button.addEventListener("click", function (event) {
+           event.stopPropagation();
+           const mask = state.answerMasks.find(function (candidate) { return String(candidate.id) === String(button.dataset.answerMaskDelete); });
+           if (mask) deleteAnswerMask(mask);
+         });
+       });
+     }
+
+     async function deleteAnswerMask(mask) {
+       const ok = await showModal("刪除答案遮罩", "刪除「" + (mask.title || "答案遮罩") + "」後，課堂與學生頁會重新顯示該範圍，確定嗎？", "confirm");
+       if (!ok) return;
+       state.answerMasks = (state.answerMasks || []).filter(function (item) { return String(item.id) !== String(mask.id); });
+       if (state.revealedAnswerMaskIds) state.revealedAnswerMaskIds.delete(String(mask.id));
+       renderRevealMasks();
+       showToast("答案遮罩已刪除，請儲存版面。", "success");
+     }
+
+     function openAnswerMaskForm(mask) {
+       const item = mask || {};
+       const content = "<form><div class=\"field\"><label for=\"answerMaskTitleField\">遮罩標籤</label><input id=\"answerMaskTitleField\" name=\"title\" maxlength=\"100\" value=\"" + escapeHtml(item.title || "答案遮罩") + "\"></div><div class=\"mask-coordinate-grid\"><div class=\"field\"><label for=\"answerMaskXField\">左側位置（％）</label><input id=\"answerMaskXField\" name=\"x\" type=\"number\" min=\"0\" max=\"100\" step=\"0.1\" value=\"" + (Number(item.x || 0) * 100).toFixed(1) + "\"></div><div class=\"field\"><label for=\"answerMaskYField\">上方位置（％）</label><input id=\"answerMaskYField\" name=\"y\" type=\"number\" min=\"0\" max=\"100\" step=\"0.1\" value=\"" + (Number(item.y || 0) * 100).toFixed(1) + "\"></div><div class=\"field\"><label for=\"answerMaskWidthField\">寬度（％）</label><input id=\"answerMaskWidthField\" name=\"width\" type=\"number\" min=\"1\" max=\"100\" step=\"0.1\" value=\"" + (Number(item.width || .2) * 100).toFixed(1) + "\"></div><div class=\"field\"><label for=\"answerMaskHeightField\">高度（％）</label><input id=\"answerMaskHeightField\" name=\"height\" type=\"number\" min=\"1\" max=\"100\" step=\"0.1\" value=\"" + (Number(item.height || .12) * 100).toFixed(1) + "\"></div></div><p class=\"helper\">目前頁碼：第 " + (Number(item.page) || state.currentPage) + " 頁。座標會隨 PDF 縮放保持對齊。</p></form>";
+       openFormModal("編輯答案遮罩", content, "儲存答案遮罩", async function (formData) {
+         const title = String(formData.get("title") || "答案遮罩").trim();
+         const width = clamp(Number(formData.get("width")) / 100, .01, 1);
+         const height = clamp(Number(formData.get("height")) / 100, .01, 1);
+         const x = clamp(Number(formData.get("x")) / 100, 0, 1 - width);
+         const y = clamp(Number(formData.get("y")) / 100, 0, 1 - height);
+         if (!title) throw new Error("請填寫遮罩標籤。");
+         Object.assign(item, { title: title, x: x, y: y, width: width, height: height });
+         syncAnswerMaskOrder();
+         renderRevealMasks();
+         showToast("答案遮罩已更新，請儲存版面。", "success");
+         return true;
+       });
+       const form = document.getElementById("modalContent").querySelector("form");
+       if (form) {
+         const deleteButton = document.createElement("button");
+         deleteButton.className = "button small danger area-form-delete";
+         deleteButton.type = "button";
+         deleteButton.textContent = "刪除答案遮罩";
+         deleteButton.addEventListener("click", function () { deleteAnswerMask(item); });
+         form.appendChild(deleteButton);
+       }
+     }
 
     function orderedAreas() {
       return state.areas.slice().sort(compareAreasByPosition);
@@ -3783,11 +4214,11 @@
       return state.areas;
     }
 
-    function renderEditorAreaList() {
-      const list = document.getElementById("areaList");
-      const count = document.getElementById("areaCount");
-      if (!list) return;
-       const areas = currentMaterialAreas();
+     function renderEditorAreaList() {
+       const list = document.getElementById("areaList");
+       const count = document.getElementById("areaCount");
+       if (!list) return;
+       const areas = orderedAreas();
       if (count) count.textContent = areas.length;
       if (!areas.length) {
         list.innerHTML = "<div class=\"area-empty\">尚未設定問答區。</div>";
@@ -3805,13 +4236,15 @@
       if (file.size > MAX_PDF_BYTES) { await showModal("PDF 太大", "請先壓縮 PDF 至 20 MB 以內，再重新上傳。", "error"); return; }
        try {
          state.pendingPdf = { name: file.name, mime: "application/pdf", data: await fileToDataUrl(file) };
+          disposePdfiumDocument();
          state.pdfBytes = new Uint8Array(await file.arrayBuffer());
           state.pdf = await window.pdfjsLib.getDocument(pdfDocumentOptions(state.pdfBytes)).promise;
            if (state.activeMaterialId) {
              state.materialPdfCache.delete(String(state.activeMaterialId));
              state.materialPdfBytesCache.delete(String(state.activeMaterialId));
              state.materialPdfLoadCache.delete(String(state.activeMaterialId));
-            state.areas = state.areas.filter(function (area) { return String(area.materialId || legacyMaterialId(state.boardId)) !== String(state.activeMaterialId); });
+             state.areas = state.areas.filter(function (area) { return String(area.materialId || legacyMaterialId(state.boardId)) !== String(state.activeMaterialId); });
+             state.answerMasks = state.answerMasks.filter(function (mask) { return String(mask.materialId || legacyMaterialId(state.boardId)) !== String(state.activeMaterialId); });
           }
          state.currentPage = 1;
          state.selectedAreaId = "";
@@ -3824,7 +4257,7 @@
     }
 
      async function saveEditorBoard() {
-       const payload = { boardId: state.board.id, name: document.getElementById("editorNameField").value.trim(), description: document.getElementById("editorDescriptionField").value.trim(), areas: syncAreaOrder() };
+        const payload = { boardId: state.board.id, name: document.getElementById("editorNameField").value.trim(), description: document.getElementById("editorDescriptionField").value.trim(), areas: syncAreaOrder(), answerMasks: syncAnswerMaskOrder() };
        if (!payload.name) { await showModal("資料未完整", "請填寫版面名稱。", "error"); return; }
        if (state.pendingPdf) {
          payload.pdf = state.pendingPdf;
@@ -3832,9 +4265,10 @@
        }
        try {
          const result = await commitLocalMutation("updateBoard", payload);
-          state.board = result.board;
-          state.materials = normalizeMaterials(state.board, result.materials || state.board.materials || state.materials);
-          state.areas = normalizeAreas(result.areas || state.areas, state.board.id);
+           state.board = result.board;
+           state.materials = normalizeMaterials(state.board, result.materials || state.board.materials || state.materials);
+           state.areas = normalizeAreas(result.areas || state.areas, state.board.id);
+           state.answerMasks = normalizeAnswerMasks(result.answerMasks || state.board.answerMasks || state.answerMasks, state.board.id);
           if (!state.materials.some(function (item) { return String(item.id) === String(state.activeMaterialId); })) state.activeMaterialId = state.materials[0] ? state.materials[0].id : "";
          state.pendingPdf = null;
          if (state.activeMaterialId) await loadMaterialPdf(state.activeMaterialId);
@@ -4009,6 +4443,35 @@
       return Math.max(0.1, Math.min(deviceScale, dimensionScale, pixelScale));
     }
 
+    async function pdfPageNeedsPdfium(page) {
+      try {
+        const textContent = await page.getTextContent();
+        return (textContent.items || []).some(function (item) { return String(item.dir || "").toLowerCase() === "ttb"; });
+      } catch (error) {
+        return false;
+      }
+    }
+
+    async function renderPdfiumPage(pageNumber, scale, outputScale, token) {
+      try {
+        const pdfDocument = await loadPdfiumDocument(state.activeMaterialId || legacyMaterialId(state.boardId));
+        if (!pdfDocument || token !== state.renderToken) return false;
+        const image = await pdfDocument.getPage(Math.max(0, Number(pageNumber) - 1)).render({ scale: Math.max(.1, scale * outputScale) });
+        if (token !== state.renderToken) return true;
+        const canvas = window.document.getElementById("pdfCanvas");
+        if (!canvas) return false;
+        const context = canvas.getContext("2d");
+        context.putImageData(new ImageData(new Uint8ClampedArray(image.data), image.width, image.height), 0, 0);
+        return true;
+      } catch (error) {
+        if (!state.pdfiumErrorShown) {
+          state.pdfiumErrorShown = true;
+          showToast("直式文字相容引擎載入失敗，暫以一般 PDF 模式顯示。", "warning");
+        }
+        return false;
+      }
+    }
+
     async function renderPdfPageNow(token) {
       const stage = document.getElementById("pageStage");
       if (!stage) return;
@@ -4024,10 +4487,19 @@
         inkCanvas.className = "ink-layer";
         stage.insertBefore(inkCanvas, document.getElementById("zoneLayer") || null);
       }
+      if (!document.getElementById("answerMaskLayer")) {
+        const answerMaskLayer = document.createElement("div");
+        answerMaskLayer.id = "answerMaskLayer";
+        answerMaskLayer.className = "answer-mask-layer";
+        stage.insertBefore(answerMaskLayer, document.getElementById("zoneLayer") || null);
+      }
+      bindAnswerMaskStageEvents();
+      bindAnswerMaskEditor();
       if (!state.pdf) {
         canvas.style.display = "none";
         const layer = document.getElementById("zoneLayer");
         layer.innerHTML = "";
+        renderRevealMasks();
         const inkCanvas = document.getElementById("inkCanvas");
         if (inkCanvas) { inkCanvas.classList.remove("visible"); inkCanvas.width = 1; inkCanvas.height = 1; }
         let empty = stage.querySelector(".empty-pdf");
@@ -4056,27 +4528,33 @@
       canvas.style.height = viewport.height + "px";
       stage.style.width = viewport.width + "px";
       stage.style.height = viewport.height + "px";
-      const context = canvas.getContext("2d");
-      context.save();
-      context.fillStyle = "#fff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.restore();
-       const renderTask = page.render({ canvasContext: context, viewport: viewport, transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null });
-       activePdfRenderTask = renderTask;
-       try {
-         await renderTask.promise;
-       } catch (error) {
-         if (error && error.name === "RenderingCancelledException") return;
-         throw error;
-       } finally {
-         if (activePdfRenderTask === renderTask) activePdfRenderTask = null;
-       }
+       const context = canvas.getContext("2d");
+       context.save();
+       context.fillStyle = "#fff";
+       context.fillRect(0, 0, canvas.width, canvas.height);
+       context.restore();
+        let renderedWithPdfium = false;
+        if (await pdfPageNeedsPdfium(page)) renderedWithPdfium = await renderPdfiumPage(state.currentPage, baseScale * state.zoom, outputScale, token);
+        if (token !== state.renderToken) return;
+        if (!renderedWithPdfium) {
+          const renderTask = page.render({ canvasContext: context, viewport: viewport, transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null });
+          activePdfRenderTask = renderTask;
+          try {
+            await renderTask.promise;
+          } catch (error) {
+            if (error && error.name === "RenderingCancelledException") return;
+            throw error;
+          } finally {
+            if (activePdfRenderTask === renderTask) activePdfRenderTask = null;
+          }
+        }
        if (token !== state.renderToken) return;
       const layer = document.getElementById("zoneLayer");
       layer.style.width = viewport.width + "px";
       layer.style.height = viewport.height + "px";
-      renderTeacherInk();
-      renderZones();
+       renderTeacherInk();
+       renderRevealMasks();
+       renderZones();
       updatePdfToolbar();
     }
 
@@ -4090,15 +4568,17 @@
       return state.areas.filter(function (area) { return String(area.materialId || legacyMaterialId(state.boardId)) === materialId; });
     }
 
-    function renderZones() {
-      const layer = document.getElementById("zoneLayer");
-      if (!layer) return;
-      layer.querySelectorAll(".zone").forEach(function (element) { element.remove(); });
+     function renderZones() {
+       const layer = document.getElementById("zoneLayer");
+       if (!layer) return;
+       renderRevealMasks();
+       layer.querySelectorAll(".zone").forEach(function (element) { element.remove(); });
        const currentAreas = currentMaterialAreas().filter(function (area) { return Number(area.page) === Number(state.currentPage); });
       currentAreas.forEach(function (area, index) {
         const zone = document.createElement("button");
         zone.type = "button";
-        zone.className = "zone" + (state.selectedAreaId === area.id ? " selected" : "");
+         const isStudentActive = state.view === "student" && String(state.activeAreaId) === String(area.id);
+         zone.className = "zone" + (state.selectedAreaId === area.id ? " selected" : "") + (isStudentActive ? " active" : "");
         zone.dataset.areaId = area.id;
         zone.style.left = (Number(area.x) * 100) + "%";
         zone.style.top = (Number(area.y) * 100) + "%";
@@ -4239,8 +4719,9 @@
       startClassroomPolling();
     }
 
-    function bindStudentEvents() {
-      const nicknameField = document.getElementById("studentNicknameField");
+     function bindStudentEvents() {
+       ensureAnswerMaskControls("student");
+       const nicknameField = document.getElementById("studentNicknameField");
       nicknameField.addEventListener("input", function () {
         state.nickname = nicknameField.value.slice(0, 40);
         localStorage.setItem(APP_KEY + "nickname", state.nickname);
@@ -4253,15 +4734,15 @@
       document.getElementById("studentFit").addEventListener("click", fitPdfToScroll);
     }
 
-    function renderStudentAreaList() {
-      const list = document.getElementById("studentAreaList");
-      if (!list) return;
+     function renderStudentAreaList() {
+       const list = document.getElementById("studentAreaList");
+       if (!list) return;
        if (!currentMaterialAreas().length) {
         list.innerHTML = "<div class=\"area-empty\">教師尚未設定問答區。</div>";
         return;
       }
       let answered = 0;
-       const areas = currentMaterialAreas();
+        const areas = studentNavigationAreas();
        list.innerHTML = areas.map(function (area, index) {
          const submission = state.studentSubmissions.get(area.id);
          if (submission) answered += 1;
@@ -4309,37 +4790,84 @@
       }
     }
 
-    function focusAreaOnPdf(area) {
-      if (!area || Number(area.page) !== Number(state.currentPage)) return;
-      const scroll = document.querySelector(".student-workspace .pdf-scroll");
-      const zone = Array.from(document.querySelectorAll(".student-workspace .zone")).find(function (item) { return String(item.dataset.areaId) === String(area.id); });
-      if (!scroll || !zone) return;
-      const scrollRect = scroll.getBoundingClientRect();
-      const zoneRect = zone.getBoundingClientRect();
-      const deltaY = zoneRect.top - scrollRect.top - (scroll.clientHeight / 2) + (zoneRect.height / 2);
-      if (Math.abs(deltaY) > 20) {
-        scroll.scrollBy({ top: deltaY, behavior: "smooth" });
-      }
-    }
+     function focusAreaOnPdf(area) {
+       if (!area || Number(area.page) !== Number(state.currentPage)) return;
+       const scroll = document.querySelector(".student-workspace .pdf-scroll");
+       const zone = Array.from(document.querySelectorAll(".student-workspace .zone")).find(function (item) { return String(item.dataset.areaId) === String(area.id); });
+       if (!scroll || !zone) return;
+       zone.classList.add("active");
+       const scrollRect = scroll.getBoundingClientRect();
+       const zoneRect = zone.getBoundingClientRect();
+       const deltaY = zoneRect.top - scrollRect.top - (scroll.clientHeight / 2) + (zoneRect.height / 2);
+       if (Math.abs(deltaY) > 20) {
+         scroll.scrollBy({ top: deltaY, behavior: "smooth" });
+       }
+     }
 
-    async function openStudentAnswerPanel(areaId) {
-      const area = state.areas.find(function (item) { return item.id === areaId; });
-      if (!area) return;
-      if (Number(area.page) !== Number(state.currentPage)) {
-        state.currentPage = Number(area.page) || 1;
-        await renderPdfPage();
-      }
-      state.activeAreaId = areaId;
-      state.pendingStudentImages = [];
-      state.activeStudentImages = [];
-      state.keepStudentImageIds = [];
+     function studentNavigationAreas() {
+       return currentMaterialAreas().slice().sort(function (left, right) {
+         const pageDifference = (Number(left.page) || 1) - (Number(right.page) || 1);
+         if (pageDifference) return pageDifference;
+         const orderDifference = (Number(left.order) || 0) - (Number(right.order) || 0);
+         if (orderDifference) return orderDifference;
+         return String(left.id).localeCompare(String(right.id));
+       });
+     }
+
+     function updateStudentQuestionNavigator() {
+       const areas = studentNavigationAreas();
+       const currentIndex = areas.findIndex(function (area) { return String(area.id) === String(state.activeAreaId); });
+       const previous = document.getElementById("studentPrevQuestion");
+       const next = document.getElementById("studentNextQuestion");
+       const position = document.getElementById("studentQuestionPosition");
+       if (previous) previous.disabled = currentIndex <= 0;
+       if (next) next.disabled = currentIndex < 0 || currentIndex >= areas.length - 1;
+       if (position) position.textContent = currentIndex < 0 ? "尚未選題" : (currentIndex + 1) + "／" + areas.length;
+     }
+
+     function moveStudentQuestion(delta) {
+       const areas = studentNavigationAreas();
+       if (!areas.length) return;
+       const currentIndex = areas.findIndex(function (area) { return String(area.id) === String(state.activeAreaId); });
+       const fallbackIndex = delta > 0 ? 0 : areas.length - 1;
+       const targetIndex = currentIndex < 0 ? fallbackIndex : clamp(currentIndex + delta, 0, areas.length - 1);
+       if (currentIndex === targetIndex) return;
+       openStudentAnswerPanel(areas[targetIndex].id);
+     }
+
+     function focusStudentAnswerPanel() {
+       const panel = document.getElementById("answerPanel");
+       if (!panel) return;
+       panel.classList.remove("is-focused");
+       void panel.offsetWidth;
+       panel.classList.add("is-focused");
+       const sidebar = document.querySelector(".student-workspace .workspace-sidebar");
+       if (sidebar) {
+         const targetTop = Math.max(0, panel.offsetTop - 12);
+         if (Math.abs(sidebar.scrollTop - targetTop) > 20) sidebar.scrollTo({ top: targetTop, behavior: "smooth" });
+       }
+       window.setTimeout(function () { panel.classList.remove("is-focused"); }, 900);
+     }
+
+     async function openStudentAnswerPanel(areaId) {
+       const area = state.areas.find(function (item) { return item.id === areaId; });
+       if (!area) return;
+       state.activeAreaId = areaId;
+       if (Number(area.page) !== Number(state.currentPage)) {
+         state.currentPage = Number(area.page) || 1;
+         await renderPdfPage();
+       }
+       state.pendingStudentImages = [];
+       state.activeStudentImages = [];
+       state.keepStudentImageIds = [];
       state.keepStudentImageNames = [];
        state.activeDraftKey = studentDraftKey(state.boardId, state.activeMaterialId, areaId, state.nickname);
-      renderStudentAreaList();
-      renderZones();
-      focusAreaOnPdf(area);
-      await renderStudentAnswerPanel();
-    }
+       renderStudentAreaList();
+       renderZones();
+       focusAreaOnPdf(area);
+       await renderStudentAnswerPanel();
+       focusStudentAnswerPanel();
+     }
 
     async function renderStudentAnswerPanel() {
       const panel = document.getElementById("answerPanel");
@@ -4366,15 +4894,18 @@
         } catch (error) {}
       }
 
-      panel.innerHTML = "<div class=\"answer-panel-head\"><div><h3>" + escapeHtml(area.title) + "</h3><p>" + escapeHtml(area.prompt) + "</p></div><button class=\"close-mini\" id=\"closeAnswerPanel\" type=\"button\">×</button></div><div class=\"field\"><label for=\"studentTextAnswer\">文字答案，可選填</label><textarea id=\"studentTextAnswer\" maxlength=\"5000\" placeholder=\"把你的想法寫下來……\">" + escapeHtml(text) + "</textarea></div><div class=\"photo-drop\"><p>拍照或選取答案照片，最多 2 張。可點擊右上角「×」刪除。</p><label class=\"button teal small\" for=\"studentPhotoField\" id=\"studentPhotoLabel\">拍照／選取照片<input id=\"studentPhotoField\" type=\"file\" accept=\"image/*\" capture=\"environment\" multiple></label><div class=\"photo-preview-grid\" id=\"newPhotoPreview\"></div></div><div id=\"existingPhotoPreview\"></div>" + (submission && submission.teacherStrokes && (submission.teacherStrokes.strokes || Array.isArray(submission.teacherStrokes)) ? "<div class=\"feedback-box\"><strong>教師回應</strong><p>" + escapeHtml(submission.teacherComment || "教師已在答案上留下批改筆跡。") + "</p><div class=\"feedback-preview\" id=\"studentFeedbackPreview\"></div></div>" : "") + "<div class=\"answer-actions\"><button class=\"button primary\" id=\"submitStudentAnswer\" type=\"button\">" + (submission ? "更新答案" : "送出答案") + "</button></div>";
-      document.getElementById("closeAnswerPanel").addEventListener("click", function () { state.activeAreaId = ""; panel.innerHTML = "<div class=\"answer-panel-empty\"><div><strong>從 PDF 選一個問答區</strong><span>你的答案會和這份教材版面分開保存。</span></div></div>"; renderStudentAreaList(); renderZones(); });
-      document.getElementById("studentTextAnswer").addEventListener("input", saveStudentDraft);
+       panel.innerHTML = "<div class=\"answer-panel-head\"><div><h3>" + escapeHtml(area.title) + "</h3><p>" + escapeHtml(area.prompt) + "</p></div><button class=\"close-mini\" id=\"closeAnswerPanel\" type=\"button\">×</button></div><div class=\"student-answer-navigator\" aria-label=\"問答區導覽\"><button class=\"toolbar-button\" id=\"studentPrevQuestion\" type=\"button\">‹ 上一題</button><span class=\"student-answer-position\" id=\"studentQuestionPosition\"></span><button class=\"toolbar-button\" id=\"studentNextQuestion\" type=\"button\">下一題 ›</button></div><div class=\"field\"><label for=\"studentTextAnswer\">文字答案，可選填</label><textarea id=\"studentTextAnswer\" maxlength=\"5000\" placeholder=\"把你的想法寫下來……\">" + escapeHtml(text) + "</textarea></div><div class=\"photo-drop\"><p>拍照或選取答案照片，最多 2 張。可點擊右上角「×」刪除。</p><label class=\"button teal small\" for=\"studentPhotoField\" id=\"studentPhotoLabel\">拍照／選取照片<input id=\"studentPhotoField\" type=\"file\" accept=\"image/*\" capture=\"environment\" multiple></label><div class=\"photo-preview-grid\" id=\"newPhotoPreview\"></div></div><div id=\"existingPhotoPreview\"></div>" + (submission && submission.teacherStrokes && (submission.teacherStrokes.strokes || Array.isArray(submission.teacherStrokes)) ? "<div class=\"feedback-box\"><strong>教師回應</strong><p>" + escapeHtml(submission.teacherComment || "教師已在答案上留下批改筆跡。") + "</p><div class=\"feedback-preview\" id=\"studentFeedbackPreview\"></div></div>" : "") + "<div class=\"answer-actions\"><button class=\"button primary\" id=\"submitStudentAnswer\" type=\"button\">" + (submission ? "更新答案" : "送出答案") + "</button></div>";
+       document.getElementById("closeAnswerPanel").addEventListener("click", function () { state.activeAreaId = ""; panel.innerHTML = "<div class=\"answer-panel-empty\"><div><strong>從 PDF 選一個問答區</strong><span>你的答案會和這份教材版面分開保存。</span></div></div>"; renderStudentAreaList(); renderZones(); });
+       document.getElementById("studentPrevQuestion").addEventListener("click", function () { moveStudentQuestion(-1); });
+       document.getElementById("studentNextQuestion").addEventListener("click", function () { moveStudentQuestion(1); });
+       document.getElementById("studentTextAnswer").addEventListener("input", saveStudentDraft);
       document.getElementById("studentPhotoField").addEventListener("change", handleStudentPhotos);
       document.getElementById("submitStudentAnswer").addEventListener("click", submitStudentAnswer);
       renderPendingPhotoPreview();
-      renderExistingPhotoPreview();
-      updatePhotoUploadButton();
-      if (submission && submission.teacherStrokes && (submission.teacherStrokes.strokes || Array.isArray(submission.teacherStrokes))) renderStudentFeedbackPreview(submission);
+       renderExistingPhotoPreview();
+       updatePhotoUploadButton();
+       updateStudentQuestionNavigator();
+       if (submission && submission.teacherStrokes && (submission.teacherStrokes.strokes || Array.isArray(submission.teacherStrokes))) renderStudentFeedbackPreview(submission);
     }
 
     function updatePhotoUploadButton() {
@@ -4659,15 +5190,17 @@
       } else if (isBoardMutationAction(item.action) && item.action !== "deleteBoard" && result.board) {
         const local = await localGet("boards", result.board.id || payload.boardId);
         const previousActiveMaterial = activeMaterial();
-        const updatedBoard = Object.assign({}, local || {}, result.board, {
-          materials: result.materials || result.board.materials || (local && local.materials) || [],
-          areas: result.areas || (local && local.areas) || []
-        });
+         const updatedBoard = Object.assign({}, local || {}, result.board, {
+           materials: result.materials || result.board.materials || (local && local.materials) || [],
+           areas: result.areas || (local && local.areas) || [],
+           answerMasks: result.answerMasks || result.board.answerMasks || (local && local.answerMasks) || []
+         });
         await localPut("boards", updatedBoard);
         if (state.board && String(state.board.id) === String(updatedBoard.id)) {
           state.board = updatedBoard;
-          state.materials = normalizeMaterials(updatedBoard, updatedBoard.materials);
-          state.areas = normalizeAreas(updatedBoard.areas || [], updatedBoard.id);
+           state.materials = normalizeMaterials(updatedBoard, updatedBoard.materials);
+           state.areas = normalizeAreas(updatedBoard.areas || [], updatedBoard.id);
+           state.answerMasks = normalizeAnswerMasks(updatedBoard.answerMasks || [], updatedBoard.id);
           const nextActiveMaterial = activeMaterial();
           const activePdfChanged = previousActiveMaterial && nextActiveMaterial && String(previousActiveMaterial.pdfFileId || "") !== String(nextActiveMaterial.pdfFileId || "");
           if (activePdfChanged) {
