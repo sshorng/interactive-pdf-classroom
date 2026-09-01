@@ -586,7 +586,8 @@
     const MAX_IMAGE_COUNT = 2;
     const MAX_PDF_BYTES = 20 * 1024 * 1024;
     const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
-    const CLASSROOM_POLL_INTERVAL = 3000;
+    const CLASSROOM_POLL_INTERVAL = 1500;
+    const CLASSROOM_SUBMISSIONS_POLL_INTERVAL = 6000;
     const INK_WIDTH_STEPS = [2, 4, 6, 8];
     const GAS_URL = resolveGasUrl();
 
@@ -647,6 +648,7 @@
       reviewZoom: 1,
       adminToken: localStorage.getItem(APP_KEY + "admin_token") || "",
       pollTimer: null,
+      lastStudentSubmissionPollAt: 0,
       outboxRetryTimer: null,
       flushBusy: false,
       imageCache: new Map(),
@@ -1751,8 +1753,9 @@
     async function gasGet(action, params) {
       if (!GAS_URL) throw new ApiError("尚未設定 GAS 網址。", true);
       const query = new URLSearchParams(Object.assign({ action: action }, params || {}));
+      query.set("_ts", String(Date.now()));
       try {
-        const response = await fetch(GAS_URL + (GAS_URL.indexOf("?") > -1 ? "&" : "?") + query.toString());
+        const response = await fetch(GAS_URL + (GAS_URL.indexOf("?") > -1 ? "&" : "?") + query.toString(), { cache: "no-store" });
         const result = await response.json();
         if (!result.ok) throw new ApiError(result.error || "GAS 操作失敗。", false);
         state.consecutiveNetworkErrors = 0;
@@ -1806,6 +1809,24 @@
         const payload = item.payload || {};
         const id = payload.boardId || payload.clientBoardId;
         return String(id || "") === String(boardId) && isBoardMutationAction(item.action);
+      });
+    }
+
+    async function hasPendingMaterialMutation(boardId, materialId) {
+      const targetBoardId = String(boardId || "");
+      const targetMaterialId = String(materialId || "");
+      const legacyId = legacyMaterialId(targetBoardId);
+      return (await localAll("outbox")).some(function (item) {
+        const payload = item.payload || {};
+        const payloadBoardId = String(payload.boardId || payload.clientBoardId || "");
+        if (payloadBoardId !== targetBoardId) return false;
+        if (item.action === "createMaterial") return String(payload.id || "") === targetMaterialId;
+        if (item.action === "updateMaterial") return String(payload.materialId || "") === targetMaterialId;
+        if (item.action === "createBoard") return targetMaterialId === legacyId && Boolean(payload.pdf);
+        if (item.action === "updateBoard") {
+          return Boolean(payload.pdf) && String(payload.materialId || legacyId) === targetMaterialId;
+        }
+        return false;
       });
     }
 
@@ -2412,8 +2433,8 @@
     }
 
       async function loadTeacherInk(materialId) {
-       const targetMaterialId = String(materialId || state.activeMaterialId || legacyMaterialId(state.boardId));
-       if (!materialId) {
+        const targetMaterialId = String(materialId || state.activeMaterialId || legacyMaterialId(state.boardId));
+        if (!materialId) {
          state.teacherInk.clear();
          state.teacherInkVersions.clear();
          teacherInkRevision.clear();
@@ -2421,14 +2442,20 @@
        } else {
          const prefix = targetMaterialId + "|";
          Array.from(state.teacherInk.keys()).forEach(function (key) { if (String(key).indexOf(prefix) === 0) state.teacherInk.delete(key); });
-       }
-       let result;
-       try {
-         result = await managerApi("listInk", { boardId: state.boardId, materialId: targetMaterialId });
-       } catch (error) {
-         if (!error.network) throw error;
-         result = await localRequest("listInk", { boardId: state.boardId, materialId: targetMaterialId });
-       }
+        }
+        let result;
+        const hasPendingMaterial = await hasPendingMaterialMutation(state.boardId, targetMaterialId);
+        const hasLocalMaterial = state.materials.some(function (item) { return String(item.id) === targetMaterialId; });
+        if (hasPendingMaterial) {
+          result = await localRequest("listInk", { boardId: state.boardId, materialId: targetMaterialId });
+        } else {
+          try {
+            result = await managerApi("listInk", { boardId: state.boardId, materialId: targetMaterialId });
+          } catch (error) {
+            if (!error.network && !(hasLocalMaterial && /找不到指定課堂教材/.test(error.message || ""))) throw error;
+            result = await localRequest("listInk", { boardId: state.boardId, materialId: targetMaterialId });
+          }
+        }
        const rows = new Map((result.data || []).map(function (item) { return [String(item.id), item]; }));
        (await pendingInkRows(state.boardId, targetMaterialId)).forEach(function (item) { rows.set(String(item.id), item); });
        const prefix = targetMaterialId + "|";
@@ -2646,7 +2673,14 @@
       classroomPollBusy = true;
       try {
         if (state.view === "review") await Promise.all([loadClassroomSync(), loadReviewSubmissions()]);
-        else if (state.view === "student") await Promise.all([loadClassroomSync(), loadStudentSubmissions()]);
+        else if (state.view === "student") {
+          const tasks = [loadClassroomSync()];
+          if (Date.now() - state.lastStudentSubmissionPollAt >= CLASSROOM_SUBMISSIONS_POLL_INTERVAL) {
+            state.lastStudentSubmissionPollAt = Date.now();
+            tasks.push(loadStudentSubmissions());
+          }
+          await Promise.all(tasks);
+        }
       } finally {
         classroomPollBusy = false;
       }
@@ -3800,6 +3834,7 @@
     async function loadStudentSubmissions() {
       const nickname = String(state.nickname || "").trim();
       if (!nickname || !state.boardId) return;
+      state.lastStudentSubmissionPollAt = Date.now();
       try {
          const result = await api("listSubmissions", { boardId: state.boardId, materialId: state.activeMaterialId, nickname: nickname, role: "student" });
         Promise.all((result.data || []).map(function (item) { return localPut("submissions", item); })).catch(function () {});
@@ -4204,7 +4239,22 @@
       if (state.demo || !GAS_URL || !navigator.onLine || state.flushBusy) return;
       state.flushBusy = true;
       try {
-        const items = (await localAll("outbox")).sort(function (a, b) { return (Number(a.sequence) || Date.parse(a.createdAt) || 0) - (Number(b.sequence) || Date.parse(b.createdAt) || 0); });
+        const items = await localAll("outbox");
+        const pendingCatalogBoards = new Set(items.filter(function (item) {
+          return isBoardMutationAction(item.action);
+        }).map(function (item) {
+          const payload = item.payload || {};
+          return String(payload.boardId || payload.clientBoardId || "");
+        }));
+        items.sort(function (a, b) {
+          const aPayload = a.payload || {};
+          const bPayload = b.payload || {};
+          const aBoardId = String(aPayload.boardId || aPayload.clientBoardId || "");
+          const bBoardId = String(bPayload.boardId || bPayload.clientBoardId || "");
+          const aStatePriority = a.action === "saveClassroomState" && !pendingCatalogBoards.has(aBoardId) ? 0 : 1;
+          const bStatePriority = b.action === "saveClassroomState" && !pendingCatalogBoards.has(bBoardId) ? 0 : 1;
+          return aStatePriority - bStatePriority || (Number(a.sequence) || Date.parse(a.createdAt) || 0) - (Number(b.sequence) || Date.parse(b.createdAt) || 0);
+        });
         for (const item of items) {
           if (!(await isCurrentOutboxItem(item))) continue;
           if (Number(item.nextAttemptAt || 0) > Date.now()) continue;
